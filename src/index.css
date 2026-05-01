@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+@import 'tailwindcss';
+
+* {
+	font-family: Outfit;
+}
+
+body {
+	background-color: black;
+	color: white;
+	/* height: 500vh; */
+}
+
+.animated-bg {
+	background: linear-gradient(270deg, rgba(209, 213, 219, 0.5), rgba(243, 244, 246, 0.7), rgba(156, 163, 175, 0.5));
+	background-size: 600% 600%;
+	animation: gradientMove 10s ease infinite;
+}
+
+@keyframes gradientMove {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
+
+.swiper-wrapper {
+	transition-timing-function: linear !important;
+}
+
+.logo-text {
+	font-family: 'Great Vibes', cursive;
+	font-size: 30px;
+	background: #dcd465;
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	text-align: center;
+	letter-spacing: 2px;
+}
