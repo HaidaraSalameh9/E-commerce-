@@ -43,6 +43,7 @@ export const TrustedBrand = () => {
                             <img
                                 src={company.logo}
                                 alt={company.name}
+                                loading="lazy"
                                 className="h-20 w-auto object-contain opacity-70 
                                 hover:opacity-100 hover:scale-110 bg-gray-100 
                                 transition-all duration-300 grayscale hover:grayscale-0"

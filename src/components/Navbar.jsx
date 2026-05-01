@@ -49,7 +49,7 @@ const Navbar = () => {
                 <div className={`container flex items-center justify-between mx-auto`}>
                     {/* Logo */}
                     <Link to="/" className="flex items-center gap-2 transition-transform duration-300 hover:scale-95 ">
-                        <img src={logo} className={`h-15 w-15 transition-transform duration-300  ${isScrolled ? "scale-90" : "scale-100"}`} />
+                        <img src={logo} loading="lazy" className={`h-15 w-15 transition-transform duration-300  ${isScrolled ? "scale-90" : "scale-100"}`} />
                     </Link>
 
                     {/* Desktop Nav */}

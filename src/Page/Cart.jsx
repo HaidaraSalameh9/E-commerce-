@@ -49,7 +49,7 @@ const Cart = ({ address, setAddress }) => {
                                             <td className="px-4 py-5">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-20 h-20 rounded-2xl bg-white border border-gray-200 shadow-sm flex items-center justify-center overflow-hidden">
-                                                        <img src={product.image} alt={product.title} className="w-full h-full object-contain p-2" />
+                                                        <img loading="lazy" src={product.image} alt={product.title} className="w-full h-full object-contain p-2" />
                                                     </div>
 
                                                     <div>
@@ -163,7 +163,7 @@ const Cart = ({ address, setAddress }) => {
                 </div>
             ) : (
                 <div className="flex flex-col items-center justify-center py-20 ">
-                    <img src={emptyCart} alt="Empty Cart" className="h-64 bg-gray-100" />
+                    <img loading="lazy" src={emptyCart} alt="Empty Cart" className="h-64 bg-gray-100" />
 
                 </div>
             )}

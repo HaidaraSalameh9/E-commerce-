@@ -19,6 +19,7 @@ const Actual = () => {
         <div className="relative h-70 md:h-90 cursor-pointer group md:col-span-4 overflow-hidden rounded-sm">
           <img
             src={actual_1}
+            loading="lazy"
             alt="Woman Collection"
             className="w-full h-full bg-black object-contain grayscale brightness-75 
       transition-all duration-700 group-hover:scale-105 group-hover:brightness-90"
@@ -39,6 +40,7 @@ const Actual = () => {
           <div className="relative cursor-pointer group overflow-hidden rounded-sm h-1/2">
             <img
               src={actual_2}
+              loading="lazy"
               alt="Accessories"
               className="w-full h-70 md:h-45 object-contain  grayscale brightness-75 bg-black
         transition-all duration-700 group-hover:scale-105 group-hover:brightness-90"
@@ -54,6 +56,7 @@ const Actual = () => {
           <div className="relative cursor-pointer group overflow-hidden rounded-sm h-1/2">
             <img
               src={actual_3}
+              loading="lazy"
               alt="Kids"
               className="w-full h-70 md:h-45 object-contain  grayscale brightness-75 bg-black
         transition-all duration-700 group-hover:scale-105 group-hover:brightness-90"
@@ -71,6 +74,7 @@ const Actual = () => {
         <div className="relative h-70 md:h-90 cursor-pointer md:col-span-4 group overflow-hidden rounded-sm">
           <img
             src={actual_4}
+            loading="lazy"
             alt="Man Collection"
             className="w-full h-full object-contain grayscale brightness-75 bg-black
       transition-all duration-700 group-hover:scale-105 group-hover:brightness-90"

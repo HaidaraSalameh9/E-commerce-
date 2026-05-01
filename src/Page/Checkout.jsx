@@ -294,6 +294,7 @@ const Checkout = ({ setOrder, address }) => {
                                     <img
                                         src={product.image}
                                         alt={product.title}
+                                        loading="lazy"
                                         className="w-16 h-16 object-cover rounded-lg border border-gray-500"
                                     />
                                     <div className="flex-1">

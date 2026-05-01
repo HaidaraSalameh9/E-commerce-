@@ -102,6 +102,7 @@ const About = () => {
                                 {/* Image */}
                                 <div className="relative w-24 h-24 mx-auto mb-4">
                                     <img
+                                        loading="lazy"
                                         src={member.image}
                                         alt={member.name}
                                         className="w-full h-full object-cover rounded-full border-4 border-gray-100 

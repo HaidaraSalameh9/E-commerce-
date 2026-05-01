@@ -86,6 +86,7 @@ const ProductDetails = () => {
                 <div className="border border-gray-400 rounded overflow-hidden flex justify-center items-center bg-gray-200/34 h-80">
                     <img
                         src={thumbnail}
+                        loading="lazy"
                         alt={product.name}
                         className="h-full object-contain  transition duration-200"
                     />
@@ -98,7 +99,7 @@ const ProductDetails = () => {
                             onClick={() => setThumbnail(image)}
                             className={`border p-1 rounded cursor-pointer  bg-gray-200 hover:bg-gray-300
                             ${thumbnail === image ? 'border-gray-500' : 'border-gray-300'}`}   >
-                            <img src={image} alt={`Thumbnail ${index + 1}`} className="w-16 h-16 object-contain" />
+                            <img src={image} loading="lazy" alt={`Thumbnail ${index + 1}`} className="w-16 h-16 object-contain" />
                         </div>
                     ))}
                 </div>

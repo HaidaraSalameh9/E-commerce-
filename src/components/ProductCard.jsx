@@ -63,7 +63,7 @@ const ProductCard = ({ product }) => {
 
                 {/* 🖼️ Image */}
                 <Link to={`/productDetails/${product.id}`}>
-                    <img src={product.images[0]} alt="product" className="relative z-10 w-full h-full object-contain
+                    <img src={product.images[0]} loading="lazy" alt="product" className="relative z-10 w-full h-full object-contain
                      bg-transparent transition-all duration-500 group-hover:scale-105" />
                 </Link>
             </div>

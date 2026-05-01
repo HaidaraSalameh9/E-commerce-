@@ -38,6 +38,7 @@ const Order = ({ order }) => {
                         {/* Customer Card */}
                         <div className=" rounded-2xl shadow p-4 flex items-center gap-4">
                             <img
+                                loading="lazy"
                                 src={user.imageUrl}
                                 alt="user"
                                 className="w-16 h-16 rounded-full object-cover border"
@@ -80,6 +81,7 @@ const Order = ({ order }) => {
                                     <div className="flex items-center gap-4">
                                         <img
                                             src={product.image}
+                                            loading="lazy"
                                             alt={product.name}
                                             className="w-14 h-14 rounded-lg object-cover" />
                                         <div>

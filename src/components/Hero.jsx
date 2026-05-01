@@ -72,6 +72,7 @@ const Hero = () => {
             <div className="w-full md:w-1/2 flex justify-center mt-10 md:mt-0">
                 <img
                     src={images[index]}
+                    loading="lazy"
                     alt="hero"
                     className={`w-180 h-full object-cover transition-all duration-700 ease-in-out ${fade ? "opacity-100 scale-100" : "opacity-0 scale-105"
                         }`}

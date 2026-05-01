@@ -13,6 +13,7 @@ const Footer = () => {
                         <img
                             src={logo}
                             alt="logo"
+                            loading="lazy"
                             className="w-10 h-10 object-contain"
                         />
 
