@@ -14,16 +14,17 @@ import OrderConfirm from './Page/OrderConfirm';
 import { useState } from 'react';
 import Favorite from './Page/Favorite';
 import ScrollButtons from './components/ScrollButtons';
+import NotFound from './Page/NotFound';
 
 const App = () => {
 
-  const isCard = useLocation().pathname.includes("cart");
+
   const [order, setOrder] = useState(null);
   const [address, setAddress] = useState("main street, 0012");
 
   return (
     <div className='px-4' >
-      {/* {!isCard && <Navbar />} */}
+
       <Navbar />
       <div className={`min-h-[72vh] mt-30 pt-2 px-4 pb-5 container mx-auto bg-gray-100 rounded`}>
         <Routes>
@@ -36,6 +37,7 @@ const App = () => {
           <Route path='/cart' element={<Cart address={address} setAddress={setAddress} />} />
           <Route path='/checkout' element={<Checkout setOrder={setOrder} address={address} />} />
           <Route path='/order-confirmation' element={<OrderConfirm order={order} />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </div>
       <Footer />
