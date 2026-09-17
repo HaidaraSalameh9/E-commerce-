@@ -37,6 +37,3 @@ const allProductSlice = createSlice({
 });
 
 export default allProductSlice.reducer;
-
-
-
