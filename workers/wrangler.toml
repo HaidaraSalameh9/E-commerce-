@@ -11,5 +11,5 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 FIREBASE_PROJECT_ID = "ecom-staging-haidara"
-ALLOWED_ORIGINS = "http://localhost:5173"
-OWNER_CLERK_USER_ID = ""
+ALLOWED_ORIGINS = "http://localhost:5173,https://e-commerce-tan-beta-6x5kc3gwca.vercel.app"
+OWNER_CLERK_USER_ID ="user_3Cq41MSDkQ6FDFrUzSezvl0YjlB"

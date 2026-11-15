@@ -190,6 +190,16 @@ export const createOrder = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY
 		// 4. Validate products and retrieve real product data
 		const seenIds = new Set();
 
+		for (const item of products) {
+			const productId = String(item.productId ?? '').trim();
+
+			if (!productId || seenIds.has(productId)) {
+				throw new Error(!productId ? 'Invalid product ID or quantity' : 'Duplicate product in order');
+			}
+
+			seenIds.add(productId);
+		}
+
 		const orderProducts = await Promise.all(
 			products.map(async (item) => {
 				const productId = String(item.productId ?? '').trim();
@@ -198,12 +208,6 @@ export const createOrder = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY
 				if (!productId || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
 					throw new Error('Invalid product ID or quantity');
 				}
-
-				if (seenIds.has(productId)) {
-					throw new Error('Duplicate product in order');
-				}
-
-				seenIds.add(productId);
 
 				const product = await getOrderableProduct(productId);
 
@@ -254,6 +258,7 @@ export const createOrder = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY
 		const activity = {
 			userId,
 			actorUserId: userId,
+			customer,
 
 			type: 'order_created',
 			description: `Created order ${order.orderNumber}`,
@@ -584,7 +589,7 @@ async function getOrderableProduct(productId) {
 	};
 }
 
-export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, response) => {
+export const cart = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY] }, async (request, response) => {
 	setCartCors(request, response);
 
 	if (request.method === 'OPTIONS') {
@@ -602,7 +607,6 @@ export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, resp
 		const userId = await verifyClerkUser(request);
 		const cartRef = db.collection('carts').doc(userId);
 
-		// Load the signed-in user's cart
 		// Load the signed-in user's cart
 		if (request.method === 'GET') {
 			const snapshot = await cartRef.get();
@@ -671,8 +675,6 @@ export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, resp
 		}
 
 		// Save the signed-in user's cart
-
-		// Save the signed-in user's cart
 		const { products } = request.body || {};
 
 		if (!Array.isArray(products) || products.length > 15) {
@@ -682,18 +684,28 @@ export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, resp
 			});
 		}
 
+		// Validate duplicate product IDs before processing products
 		const seenIds = new Set();
 
+		for (const item of products) {
+			const productId = String(item.productId ?? '').trim();
+
+			if (!productId || seenIds.has(productId)) {
+				throw new Error('Invalid cart product or quantity');
+			}
+
+			seenIds.add(productId);
+		}
+
+		// Validate products and quantities
 		const validatedProducts = await Promise.all(
 			products.map(async (item) => {
 				const productId = String(item.productId ?? '').trim();
 				const quantity = Number(item.quantity);
 
-				if (!productId || !Number.isInteger(quantity) || quantity < 1 || quantity > 8 || seenIds.has(productId)) {
+				if (!Number.isInteger(quantity) || quantity < 1 || quantity > 8) {
 					throw new Error('Invalid cart product or quantity');
 				}
-
-				seenIds.add(productId);
 
 				const product = await getOrderableProduct(productId);
 
@@ -707,6 +719,37 @@ export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, resp
 				};
 			}),
 		);
+
+		// Get customer information from Clerk
+		let customer = {
+			name: 'Unknown Customer',
+			email: 'No email',
+			imageUrl: null,
+		};
+
+		try {
+			const secretKey = process.env.CLERK_SECRET_KEY;
+
+			if (!secretKey) {
+				throw new Error('CLERK_SECRET_KEY is not configured');
+			}
+
+			const clerk = createClerkClient({
+				secretKey: secretKey.replace(/^\uFEFF/, '').trim(),
+			});
+
+			const clerkUser = await clerk.users.getUser(userId);
+
+			const primaryEmail = clerkUser.emailAddresses?.find((email) => email.id === clerkUser.primaryEmailAddressId)?.emailAddress || clerkUser.emailAddresses?.[0]?.emailAddress || 'No email';
+
+			customer = {
+				name: [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || 'Unnamed User',
+				email: primaryEmail,
+				imageUrl: clerkUser.imageUrl || null,
+			};
+		} catch (profileError) {
+			console.error('Could not retrieve Clerk cart customer profile:', profileError.message);
+		}
 
 		// Compare old cart with new cart and record activities
 		const updatedAt = new Date().toISOString();
@@ -781,6 +824,7 @@ export const cart = onRequest({ secrets: [CLERK_JWT_KEY] }, async (request, resp
 				transaction.set(activityRef, {
 					userId,
 					actorUserId: userId,
+					customer,
 					...activity,
 					createdAt: updatedAt,
 				});
@@ -1483,6 +1527,13 @@ export const updateOrderStatus = onRequest({ secrets: [CLERK_JWT_KEY] }, async (
 				userId: orderData.userId,
 				actorUserId: adminUserId,
 
+				// Customer information from the original order
+				customer: orderData.customer || {
+					name: 'Unknown Customer',
+					email: 'No email',
+					imageUrl: null,
+				},
+
 				type: 'order_status_updated',
 
 				description: `Order status changed from ${previousStatus} to ${status}`,
@@ -1635,7 +1686,9 @@ export const getAllUsers = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY
 		while (hasMoreUsers) {
 			const clerkResponse = await fetch(`https://api.clerk.com/v1/users?limit=${limit}&offset=${offset}`, {
 				headers: {
-					Authorization: `Bearer ${secretKey}`,
+					Authorization: `Bearer ${String(secretKey)
+						.replace(/^\uFEFF/, '')
+						.trim()}`,
 				},
 			});
 
@@ -1669,9 +1722,11 @@ export const getAllUsers = onRequest({ secrets: [CLERK_JWT_KEY, CLERK_SECRET_KEY
 	} catch (error) {
 		console.error('getAllUsers failed:', error.message);
 
-		return response.status(500).json({
+		const status = Number.isInteger(error.status) ? error.status : 500;
+
+		return response.status(status).json({
 			success: false,
-			message: 'Could not load users. Please try again.',
+			message: status === 401 ? 'Authentication required.' : status === 403 ? 'Access denied.' : 'Could not load users. Please try again.',
 		});
 	}
 });
@@ -2271,7 +2326,11 @@ export const getOwnerDeliveredRevenue = onRequest({ secrets: [CLERK_JWT_KEY, CLE
 		for (const doc of snapshot.docs) {
 			const data = doc.data();
 
-			if (String(data.status || '').toLowerCase().trim() !== 'delivered') {
+			if (
+				String(data.status || '')
+					.toLowerCase()
+					.trim() !== 'delivered'
+			) {
 				continue;
 			}
 

@@ -1,0 +1,16 @@
+name = "ecommerce-api-staging"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets are NOT in this file.
+#   Local dev : workers/.dev.vars   (git-ignored)
+#   Production: npx wrangler secret put CLERK_JWT_KEY
+#               npx wrangler secret put CLERK_SECRET_KEY
+#               npx wrangler secret put FIRESTORE_SERVICE_ACCOUNT
+
+[vars]
+FIREBASE_PROJECT_ID = "ecom-staging-haidara"
+ALLOWED_ORIGINS = "http://localhost:5173,https://e-commerce-tan-beta-6x5kc3gwca.vercel.app"
+OWNER_CLERK_USER_ID ="user_3Cq41MSDkQ6FDFrUzSezvl0YjlB"
+

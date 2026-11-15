@@ -95,7 +95,7 @@ function serviceAccount(env) {
 
 	if (!raw) throw new Error('FIRESTORE_SERVICE_ACCOUNT is not configured');
 
-	return typeof raw === 'string' ? JSON.parse(raw) : raw;
+	return typeof raw === 'string' ? JSON.parse(raw.replace(/^\uFEFF/, "")) : raw;
 }
 
 async function accessToken(env) {

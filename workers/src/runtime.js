@@ -23,6 +23,29 @@ export function currentEnv() {
 	return storage.getStore()?.env ?? {};
 }
 
+export async function inspectClerkKey() {
+	const value = currentEnv().CLERK_JWT_KEY;
+	const normalized = typeof value === 'string' ? value.replace(/\\n/g, '\n').trim() : '';
+
+	let spkiImport = 'NOT TESTED';
+
+	try {
+		await importSPKI(normalized, 'RS256');
+		spkiImport = 'OK';
+	} catch (error) {
+		spkiImport = error.message;
+	}
+
+	return {
+		exists: Boolean(value),
+		startsPEM: normalized.startsWith('-----BEGIN PUBLIC KEY-----'),
+		endsPEM: normalized.endsWith('-----END PUBLIC KEY-----'),
+		normalizedLength: normalized.length,
+		hasRealNewlines: normalized.includes('\n'),
+		spkiImport,
+	};
+}
+
 export function getDb() {
 	const store = storage.getStore();
 
@@ -49,8 +72,13 @@ export const db = new Proxy(
 let keyCache = { pem: null, key: null };
 
 async function publicKey(pem) {
-	if (keyCache.pem !== pem) {
-		keyCache = { pem, key: await importSPKI(pem, 'RS256', { extractable: true }) };
+	const normalizedPem = String(pem).replace(/\\n/g, '\n').trim();
+
+	if (keyCache.pem !== normalizedPem) {
+		keyCache = {
+			pem: normalizedPem,
+			key: await importSPKI(normalizedPem, 'RS256', { extractable: true }),
+		};
 	}
 
 	return keyCache.key;
@@ -58,7 +86,6 @@ async function publicKey(pem) {
 
 // Same contract as @clerk/backend verifyToken for the options used here.
 export async function verifyToken(token, { jwtKey, authorizedParties } = {}) {
-
 	if (!jwtKey) throw new Error('CLERK_JWT_KEY is not configured');
 
 	const { payload } = await jwtVerify(token, await publicKey(jwtKey), {
@@ -100,8 +127,12 @@ function mapUser(user) {
 async function clerkRequest(secretKey, path) {
 	if (!secretKey) throw new Error('CLERK_SECRET_KEY is not configured');
 
+	const cleanSecretKey = String(secretKey)
+		.replace(/^\uFEFF/, '')
+		.trim();
+
 	const response = await fetch(`https://api.clerk.com/v1${path}`, {
-		headers: { Authorization: `Bearer ${String(secretKey).trim()}` },
+		headers: { Authorization: `Bearer ${cleanSecretKey}` },
 	});
 
 	if (!response.ok) throw new Error(`Clerk request failed (${response.status})`);
@@ -153,11 +184,7 @@ export const onRequest = (optionsOrHandler, maybeHandler) => (typeof optionsOrHa
 export function allowedOrigins(env) {
 	const devOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173'];
 
-	return [
-		...new Set(
-			[...((env && env.ALLOWED_ORIGINS) || '').split(','), ...devOrigins].map((origin) => origin.trim().replace(/\/+$/, '')).filter(Boolean),
-		),
-	];
+	return [...new Set([...((env && env.ALLOWED_ORIGINS) || '').split(','), ...devOrigins].map((origin) => origin.trim().replace(/\/+$/, '')).filter(Boolean))];
 }
 
 // Shape compatible with ALLOWED_ORIGINS.includes(origin) and with
