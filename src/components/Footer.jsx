@@ -1,127 +1,240 @@
-import React from "react";
-import { FaFacebookF, FaInstagram, FaGithub, FaTwitter } from "react-icons/fa";
-import logo from './../../public/logo.png';
+import React from 'react';
+import { FaFacebookF, FaInstagram, FaGithub, FaTwitter } from 'react-icons/fa';
+import { Link } from 'react-router';
+import { useClerk, useUser } from '@clerk/react';
+import logo from '../../public/logo.png';
+
+/* -------------------------------------------------------------------------- */
+/*  Content                                                                   */
+/*                                                                            */
+/*  Every label from the original footer is kept. An item becomes a real link */
+/*  as soon as it has a destination:                                          */
+/*    { label, to: '/route' }   → internal link                               */
+/*    { label, action: ... }   → Clerk sign-in / sign-up                      */
+/*    { label }                → no destination yet: plain text, not a link   */
+/*  `when: 'user' | 'guest'` shows an item only to signed-in / signed-out     */
+/*  visitors (same idea as the Navbar's `login` flag).                        */
+/* -------------------------------------------------------------------------- */
+
+const GROUPS = [
+	{
+		title: 'Shop',
+		links: [
+			{ label: 'Products', to: '/products' },
+			{ label: 'Cart', to: '/cart' },
+		],
+	},
+	{
+		title: 'Company',
+		links: [{ label: 'About', to: '/about' }, { label: 'Careers' }, { label: 'Press' }, { label: 'Blog' }],
+	},
+	{
+		title: 'Support',
+		links: [{ label: 'Help Center' }, { label: 'Returns' }, { label: 'Shipping' }, { label: 'Contact', to: '/contact' }],
+	},
+	{
+		title: 'Account',
+		links: [
+			{ label: 'Login', action: 'signIn', when: 'guest' },
+			{ label: 'Register', action: 'signUp', when: 'guest' },
+			{ label: 'Orders', to: '/my-orders', when: 'user' },
+			{ label: 'Wishlist', to: '/favorite' },
+		],
+	},
+	{
+		title: 'Legal',
+		links: [{ label: 'Privacy Policy' }, { label: 'Terms' }, { label: 'Cookies' }],
+	},
+];
+
+// Add the profile URL as `href` and the icon turns into a real, accessible link.
+const SOCIALS = [
+	{ name: 'Twitter', Icon: FaTwitter, href: null },
+	{ name: 'Facebook', Icon: FaFacebookF, href: null },
+	{ name: 'Instagram', Icon: FaInstagram, href: null },
+	{ name: 'GitHub', Icon: FaGithub, href: null },
+];
+
+const PAYMENTS = [
+	{ name: 'Visa', src: 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/visa.svg' },
+	{ name: 'Mastercard', src: 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/mastercard.svg' },
+	{ name: 'PayPal', src: 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/paypal.svg' },
+	{ name: 'Apple Pay', src: 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/applepay.svg' },
+	{ name: 'Google Pay', src: 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlepay.svg' },
+];
+
+/* -------------------------------------------------------------------------- */
+/*  Styles                                                                    */
+/* -------------------------------------------------------------------------- */
+
+// Brass underline slides in under links on hover / keyboard focus
+const LINK_CLASS =
+	'relative inline-block w-fit text-sm text-stone-200 transition-colors duration-300 after:absolute after:-bottom-0.5 after:left-0 after:h-px after:w-0 after:bg-brass-400 after:transition-all after:duration-300 hover:text-white hover:after:w-full focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brass-400 focus-visible:after:w-full';
+
+const SOCIAL_BASE = 'flex h-11 w-11 items-center justify-center rounded-full ring-1';
+
+/* -------------------------------------------------------------------------- */
+/*  Footer                                                                    */
+/* -------------------------------------------------------------------------- */
 
 const Footer = () => {
-    return (
-        <footer className="container  mx-auto text-gray-400 pt-12 pb-6 ">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-10">
+	const { user } = useUser();
+	const { openSignIn, openSignUp } = useClerk();
 
-                {/* Brand */}
-                <div className="sm:col-span-2 lg:col-span-2  sm:text-left">
-                    <div className="flex items-center  sm:justify-start gap-3 mb-4">
-                        <img
-                            src={logo}
-                            alt="logo"
-                            loading="lazy"
-                            className="w-10 h-10 object-contain"
-                        />
+	const isVisible = (item) => (item.when === 'user' ? !!user : item.when === 'guest' ? !user : true);
 
-                        <h2 className="logo-text">
-                            Al-Haidara
-                        </h2>
-                    </div>
+	const renderLink = (item) => {
+		if (item.to) {
+			return (
+				<Link
+					to={item.to}
+					className={LINK_CLASS}>
+					{item.label}
+				</Link>
+			);
+		}
 
-                    <p className="text-sm mb-5 leading-relaxed text-gray-400">
-                        Your all-in-one marketplace. Discover everything you need —
-                        from fashion and electronics to everyday essentials.
-                    </p>
+		if (item.action) {
+			return (
+				<button
+					type='button'
+					onClick={() => (item.action === 'signIn' ? openSignIn() : openSignUp())}
+					className={`${LINK_CLASS} text-left`}>
+					{item.label}
+				</button>
+			);
+		}
 
-                    <div className="flex  sm:justify-start gap-3">
-                        {[FaTwitter, FaFacebookF, FaInstagram, FaGithub].map((Icon, i) => (
-                            <div
-                                key={i}
-                                className="p-2 border border-gray-700 rounded-full
-          hover:bg-white hover:text-black transition-all duration-300
-          cursor-pointer hover:scale-110"
-                            >
-                                <Icon />
-                            </div>
-                        ))}
-                    </div>
-                </div>
+		// No destination yet: keep the information, but don't pretend it's a link
+		return <span className='text-sm text-stone-400'>{item.label}</span>;
+	};
 
-                {/* Links */}
-                {[
-                    {
-                        title: "Company",
-                        links: ["About", "Careers", "Press", "Blog"],
-                    },
-                    {
-                        title: "Support",
-                        links: ["Help Center", "Returns", "Shipping", "Contact"],
-                    },
-                    {
-                        title: "Account",
-                        links: ["Login", "Register", "Orders", "Wishlist"],
-                    },
-                    {
-                        title: "Legal",
-                        links: ["Privacy Policy", "Terms", "Cookies"],
-                    },
-                ].map((section, index) => (
-                    <div
-                        key={index}
-                        className=" sm:text-left lg:text-right last:lg:text-left"
-                    >
-                        <h3 className="font-semibold text-white mb-4 text-sm uppercase tracking-wide">
-                            {section.title}
-                        </h3>
+	return (
+		<footer className='container mx-auto pb-4 pt-8'>
+			<div className='relative overflow-hidden rounded-card bg-gradient-to-b from-graphite to-ink px-6 pt-10 ring-1 ring-white/10 sm:px-10 sm:pt-14 lg:px-14'>
+				{/* same atmosphere as the page heroes and the Navbar */}
+				<div
+					className='pointer-events-none absolute inset-0'
+					style={{ background: 'radial-gradient(50% 60% at 100% 0%, rgba(251,191,36,.16), transparent 60%), radial-gradient(40% 50% at 0% 100%, rgba(120,113,108,.2), transparent 60%)' }}
+				/>
+				<div
+					className='pointer-events-none absolute inset-0 opacity-[.05]'
+					style={{
+						backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
+						backgroundSize: '44px 44px',
+						WebkitMaskImage: 'linear-gradient(to bottom, #000, transparent 70%)',
+						maskImage: 'linear-gradient(to bottom, #000, transparent 70%)',
+					}}
+				/>
+				<span
+					aria-hidden='true'
+					className='pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-brass-300/60 to-transparent'
+				/>
 
-                        <ul className="space-y-2 text-sm">
-                            {section.links.map((link, i) => (
-                                <li key={i}>
-                                    <a
-                                        href="#"
-                                        className="hover:text-white transition duration-200"
-                                    >
-                                        {link}
-                                    </a>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                ))}
-            </div>
+				<div className='relative'>
+					{/* Brand */}
+					<div className='flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between'>
+						<div className='max-w-xl'>
+							<Link
+								to='/'
+								aria-label='Al-Haidara home'
+								className='group inline-flex items-center gap-4 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brass-400'>
+								<span className='flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/5 p-1.5 ring-1 ring-white/15 transition duration-500 ease-soft group-hover:scale-95 group-hover:ring-brass-400/60'>
+									<img
+										src={logo}
+										alt=''
+										loading='lazy'
+										className='h-full w-full object-contain'
+									/>
+								</span>
+								<span className='font-script text-4xl leading-none text-wordmark'>Al-Haidara</span>
+							</Link>
 
-            {/* Bottom */}
-            <div className="border-t border-gray-800 mt-12 pt-6 flex flex-col md:flex-row justify-between items-center gap-4 text-sm">
+							<p className='mt-8 font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl'>Your all-in-one marketplace.</p>
+							<p className='mt-4 max-w-md text-base leading-relaxed text-stone-400'>Discover everything you need — from fashion and electronics to everyday essentials.</p>
+						</div>
 
-                <p className="text-gray-500">
-                    © {new Date().getFullYear()} Al-Haidara. All rights reserved.
-                </p>
+						<ul
+							aria-label='Social media'
+							className='flex gap-3'>
+							{SOCIALS.map(({ name, Icon, href }) => (
+								<li key={name}>
+									{href ? (
+										<a
+											href={href}
+											target='_blank'
+											rel='noopener noreferrer'
+											aria-label={`Al-Haidara on ${name}`}
+											className={`${SOCIAL_BASE} bg-white/5 text-stone-200 ring-white/15 transition duration-300 ease-soft hover:-translate-y-1 hover:bg-brass-400 hover:text-ink hover:ring-brass-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass-400`}>
+											<Icon aria-hidden='true' />
+										</a>
+									) : (
+										// no profile URL yet → decorative, not interactive
+										<span
+											aria-hidden='true'
+											className={`${SOCIAL_BASE} bg-white/[.03] text-stone-500 ring-white/10`}>
+											<Icon />
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					</div>
 
-                {/* Payments */}
-                <div className="flex gap-4 items-center">
-                    <img
-                        src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/visa.svg"
-                        alt="visa"
-                        className="h-6 bg-white p-1 rounded"
-                    />
-                    <img
-                        src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/mastercard.svg"
-                        alt="mastercard"
-                        className="h-6 bg-white p-1 rounded"
-                    />
-                    <img
-                        src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/paypal.svg"
-                        alt="paypal"
-                        className="h-6 bg-white p-1 rounded"
-                    />
-                    <img
-                        src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/applepay.svg"
-                        alt="applepay"
-                        className="h-6 bg-white p-1 rounded"
-                    />
-                    <img
-                        src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlepay.svg"
-                        alt="gpay"
-                        className="h-6 bg-white p-1 rounded"
-                    />
-                </div>
-            </div>
-        </footer>
-    );
+					{/* Links */}
+					<nav
+						aria-label='Footer'
+						className='mt-12 grid grid-cols-2 gap-x-6 gap-y-10 border-t border-white/10 pt-10 sm:grid-cols-3 lg:grid-cols-5'>
+						{GROUPS.map((group) => (
+							<div key={group.title}>
+								<h2 className='font-display text-base font-bold text-white'>{group.title}</h2>
+								<span
+									aria-hidden='true'
+									className='mt-2 block h-0.5 w-6 rounded-full bg-brass-400'
+								/>
+								<ul className='mt-5 space-y-3'>
+									{group.links.filter(isVisible).map((item) => (
+										<li key={item.label}>{renderLink(item)}</li>
+									))}
+								</ul>
+							</div>
+						))}
+					</nav>
+
+					{/* Bottom bar */}
+					<div className='mt-12 flex flex-col items-start justify-between gap-5 border-t border-white/10 py-6 text-sm sm:flex-row sm:items-center'>
+						<p className='text-stone-400'>© {new Date().getFullYear()} Al-Haidara. All rights reserved.</p>
+
+						<ul
+							aria-label='Payment methods'
+							className='flex flex-wrap items-center gap-2.5'>
+							{PAYMENTS.map(({ name, src }) => (
+								<li
+									key={name}
+									className='flex h-9 w-14 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-white/20 transition duration-300 ease-soft hover:-translate-y-0.5'>
+									<img
+										src={src}
+										alt={name}
+										width='40'
+										height='24'
+										loading='lazy'
+										className='h-full w-full object-contain'
+									/>
+								</li>
+							))}
+						</ul>
+					</div>
+				</div>
+
+				{/* Oversized wordmark, fading into the panel edge (decorative) */}
+				<div
+					aria-hidden='true'
+					className='pointer-events-none relative select-none overflow-hidden text-center'>
+					<span className='block bg-gradient-to-b from-brass-300/35 via-brass-400/10 to-transparent bg-clip-text font-script text-[clamp(4.5rem,19vw,15rem)] leading-[1.05] text-transparent'>Al-Haidara</span>
+				</div>
+			</div>
+		</footer>
+	);
 };
 
 export default Footer;

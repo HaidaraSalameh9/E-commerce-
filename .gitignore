@@ -27,3 +27,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Environment variables
+.env*
+functions/.env*
+
+# Firebase local secrets
+.secret.local
+functions/.secret.local
+
+# Local AI/editor tooling
+.agents/
+.cursor/

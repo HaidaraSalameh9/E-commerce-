@@ -1,14 +1,147 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+/* One request for all three brand fonts. (Later this moves to <link> tags in index.html.) */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Great+Vibes&family=Outfit:wght@100..900&display=swap');
 @import 'tailwindcss';
 
-* {
-	font-family: Outfit;
+/* ==========================================================================
+   AL-HAIDARA DESIGN TOKENS
+   Tailwind v4 turns every variable in @theme into utilities:
+   --color-brass-400 -> bg-brass-400 / text-brass-400
+   --radius-card     -> rounded-card
+   --shadow-card     -> shadow-card
+   --ease-soft       -> ease-soft
+   --animate-pop     -> animate-pop
+   These tokens are additive: nothing in the app uses them yet, so adding them
+   changes no pixels. Pages migrate to them one at a time.
+   ========================================================================== */
+@theme {
+	/* Typography: Outfit = UI/body, Bricolage = headings & prices, Great Vibes = wordmark only */
+	--font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Bricolage Grotesque', 'Outfit', ui-sans-serif, system-ui, sans-serif;
+	--font-script: 'Great Vibes', cursive;
+
+	/* Neutrals: warm stone */
+	--color-ink: #0c0a09; /* stone-950: heroes, stages */
+	--color-charcoal: #1c1917; /* stone-900: buttons, dark cards */
+	--color-graphite: #292524; /* stone-800: dark surface highlights */
+	--color-paper: #f5f5f4; /* stone-100: light page background */
+
+	/* Brand accent: brass (same values as Tailwind amber 200–700, now named for the brand) */
+	--color-brass-200: #fde68a;
+	--color-brass-300: #fcd34d;
+	--color-brass-400: #fbbf24;
+	--color-brass-500: #f59e0b;
+	--color-brass-600: #d97706;
+	--color-brass-700: #b45309;
+	--color-wordmark: #dcd465; /* the logo text gold */
+
+	/* Shape */
+	--radius-card: 28px;
+	--radius-inner: 20px;
+
+	/* Depth */
+	--shadow-card: 0 1px 2px rgba(28, 25, 23, 0.05), 0 14px 30px -20px rgba(28, 25, 23, 0.35);
+	--shadow-card-hover: 0 2px 4px rgba(28, 25, 23, 0.06), 0 30px 50px -24px rgba(28, 25, 23, 0.5);
+	--shadow-float: 0 30px 60px -30px rgba(28, 25, 23, 0.5);
+
+	/* Motion */
+	--ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--animate-pop: pop 0.6s var(--ease-soft) backwards;
+	--animate-swap: swap 0.5s var(--ease-soft) backwards;
+	--animate-ring: ring 2.2s ease-out infinite;
+	--animate-rise: rise 0.8s var(--ease-soft) backwards;
+	/* Seamless logo marquee: set --marquee-gap / --marquee-duration on the container */
+	--animate-marquee: marquee var(--marquee-duration, 40s) linear infinite;
+
+	@keyframes pop {
+		0% {
+			opacity: 0;
+			transform: scale(0.5);
+		}
+		70% {
+			transform: scale(1.1);
+		}
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+	@keyframes swap {
+		from {
+			opacity: 0;
+			transform: scale(0.94);
+		}
+	}
+	@keyframes rise {
+		from {
+			opacity: 0;
+			transform: translateY(24px);
+		}
+	}
+	@keyframes marquee {
+		to {
+			transform: translateX(calc(-100% - var(--marquee-gap, 4rem)));
+		}
+	}
+	@keyframes ring {
+		0% {
+			opacity: 0.75;
+			transform: scale(1);
+		}
+		100% {
+			opacity: 0;
+			transform: scale(1.9);
+		}
+	}
 }
 
+/* Height of the fixed Navbar (floating pill: pt-3 + h-16, plus a little air). Full-bleed pages use `pt-nav`
+   so their hero starts under the bar. Verify against the real navbar once. */
+:root {
+	--nav-h: 5.5rem;
+}
+@utility pt-nav {
+	padding-top: var(--nav-h);
+}
+
+/* ==========================================================================
+   BASE
+   The old `* { font-family: Outfit }` rule was UNLAYERED, which beats every
+   Tailwind utility (font-mono, font-serif… never worked) and breaks inheritance.
+   Setting --font-sans above makes Tailwind's own preflight apply Outfit to <html>,
+   so that rule is no longer needed.
+   ========================================================================== */
+@layer base {
+	html {
+		scroll-padding-top: calc(var(--nav-h) + 1rem);
+	}
+	::selection {
+		background: var(--color-brass-300);
+		color: var(--color-ink);
+	}
+	:focus-visible {
+		outline-color: var(--color-brass-500);
+	}
+
+	/* One global reduced-motion rule replaces the per-page ones. Swiper's marquee is excluded. */
+	@media (prefers-reduced-motion: reduce) {
+		*:not(.swiper-wrapper),
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
+}
+
+/* ==========================================================================
+   LEGACY (unchanged on purpose – these are unlayered, so they still win over
+   Tailwind exactly as before. We scope or retire them when their pages are redone.)
+   ========================================================================== */
 body {
 	background-color: black;
 	color: white;
-	/* height: 500vh; */
 }
 
 .animated-bg {
@@ -29,14 +162,18 @@ body {
 	}
 }
 
+/* Affects EVERY Swiper in the app. TopProducts no longer depends on it (it sets Swiper's own
+   --swiper-wrapper-transition-timing-function on its carousel), so this can be deleted once
+   you've confirmed no other Swiper relies on linear easing. */
 .swiper-wrapper {
 	transition-timing-function: linear !important;
 }
 
+/* Great Vibes is now actually loaded (it never was before; the footer wordmark fell back to the system cursive font). */
 .logo-text {
-	font-family: 'Great Vibes', cursive;
+	font-family: var(--font-script);
 	font-size: 30px;
-	background: #dcd465;
+	background: var(--color-wordmark);
 	-webkit-background-clip: text;
 	-webkit-text-fill-color: transparent;
 	text-align: center;
