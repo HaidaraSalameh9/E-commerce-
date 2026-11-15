@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import Hero from '../components/Hero';
 import Actual from '../components/Actual';
 import TrustedBrand from '../components/TrustedBrand';
-import NewArrivals from '../components/NewArrivals';
+import NewArrivals from '../components/Newarrivals';
 import TopProducts from '../components/TopProducts';
 import useCatalog from '../hooks/useCatalog';
 import { selectNewArrivals } from '../utils/catalogSelectors';
@@ -30,3 +30,4 @@ const Home = () => {
 };
 
 export default Home;
+
