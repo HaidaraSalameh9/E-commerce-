@@ -3,7 +3,7 @@
 // switching hosts only changes VITE_API_BASE_URL.
 
 import { toRequestContext, createResponse } from './http.js';
-import { runWithContext, inspectClerkKey } from './runtime.js';
+import { runWithContext } from './runtime.js';
 import * as api from './api.js';
 
 const json = (status, body) =>
@@ -52,9 +52,6 @@ export default {
 		}
 
 		return runWithContext(env, async () => {
-			if (path === '/getMyRole') {
-				console.log('Clerk key diagnostic:', await inspectClerkKey());
-			}
 			try {
 				const req = await toRequestContext(request);
 				const res = createResponse();
