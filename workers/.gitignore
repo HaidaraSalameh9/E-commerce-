@@ -1,0 +1,7 @@
+node_modules/
+.dev.vars
+.dev.vars.*
+.dry-run/
+.wrangler/
+test/emu.log
+test/*.log

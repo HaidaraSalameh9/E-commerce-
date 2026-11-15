@@ -7,10 +7,10 @@ Full-stack e-commerce storefront: React 19 + Vite frontend, Clerk authentication
 | Layer | Technology |
 | --- | --- |
 | Frontend | React 19, Vite, React Router 7, Redux Toolkit, Tailwind CSS 4 |
-| Auth | Clerk (`@clerk/react` on the client, `@clerk/backend` on the functions) |
-| API | Firebase Cloud Functions (`functions/index.js`), one `onRequest` endpoint per action |
+| Auth | Clerk (`@clerk/react` on the client, `@clerk/backend` on the API) |
+| API | Cloudflare Worker (`workers/`, free tier) — the same 25 endpoints as `functions/index.js`, which stays in the repo as the reference implementation |
 | Database | Firestore (`orders`, `customProducts`, `carts`, `users/{id}/favorites`, `userActivity`) |
-| Hosting | Vercel (frontend) + Firebase (functions, Firestore) |
+| Hosting | Cloudflare Pages (frontend) + Cloudflare Workers (API) + Firestore (database) |
 
 ## Roles
 
@@ -52,7 +52,27 @@ Backend (`functions/.env`, never committed):
 
 ## Deploying
 
-### 1. Backend (Cloud Functions)
+### 1. Backend (Cloudflare Worker — free, no billing account)
+
+See [`workers/README.md`](workers/README.md) for the full guide. Short version:
+
+```bash
+cd workers
+npx wrangler login
+npx wrangler secret put CLERK_JWT_KEY              # PEM public key
+npx wrangler secret put CLERK_SECRET_KEY           # Clerk backend key
+npx wrangler secret put FIRESTORE_SERVICE_ACCOUNT  # service-account JSON, one line
+npx wrangler deploy                                # https://ecommerce-api.<subdomain>.workers.dev
+```
+
+Set `FIREBASE_PROJECT_ID` and `ALLOWED_ORIGINS` in `workers/wrangler.toml` before deploying.
+`ALLOWED_ORIGINS` must contain the exact frontend origin (including the `pages.dev` one),
+because it drives both CORS and Clerk's `azp` check.
+
+### 1b. Backend (Cloud Functions — original, requires the Blaze plan)
+
+Still valid and unchanged; kept as the reference implementation. It cannot be deployed on
+the free Spark plan because Functions v2 need billing and Secret Manager.
 
 ```bash
 firebase login
@@ -70,12 +90,21 @@ The functions deploy to `us-central1`. API base URL:
 https://us-central1-e-commerce-app-717a6.cloudfunctions.net
 ```
 
-### 2. Frontend (Vercel)
+### 2. Frontend (Cloudflare Pages, alternative: Vercel)
+
+Cloudflare Pages (free):
+
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name ecommerce-storefront
+```
+
+Vercel alternative:
 
 1. Import the GitHub repo in Vercel, framework preset **Vite**.
-2. Add the `VITE_*` environment variables (including `VITE_API_BASE_URL` pointing at the URL above).
+2. Add the `VITE_*` environment variables (including `VITE_API_BASE_URL` pointing at the API base URL above).
 3. `vercel.json` already rewrites all routes to `index.html`, so deep links such as `/products/12` work on refresh.
-4. After the first deploy, copy the production origin into `ALLOWED_ORIGINS` in `functions/.env` and redeploy the functions, otherwise every protected request returns 403 / 401.
+4. After the first deploy, copy the production origin into `ALLOWED_ORIGINS` and redeploy the API, otherwise every protected request returns 403 / 401.
 
 ### Clerk checklist for production
 
