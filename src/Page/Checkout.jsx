@@ -266,7 +266,9 @@ const Checkout = ({ setOrder, address }) => {
 									className='shrink-0 text-amber-300'
 									aria-hidden='true'
 								/>
-								You’re signed in — review your details before placing your order.
+								{user
+									? 'You’re signed in — review your details before placing your order.'
+									: 'You’ll be asked to sign in before your order can be placed.'}
 							</p>
 						</div>
 					</div>
