@@ -1,18 +1,23 @@
 import { Activity, Users, ShoppingBag, ShoppingCart, TrendingUp, Clock, CheckCircle2, Package, DollarSign } from 'lucide-react';
 
 /**
- * ActivityStats — same props as before ({ stats }), same four original
- * cards, plus four more derived from the SAME activity data (no new
- * source, no invented numbers). Only the skin changed: dark charcoal
- * cards, gold icon tiles, warm-white type.
+ * ActivityStats — same props as before ({ stats }), same eight cards,
+ * same data sources (see AdminActivity.jsx). UI quality pass only:
  *
- * New cards and where their numbers come from (AdminActivity.jsx):
- *   pending   – order_created minus completed (from status updates)
- *   completed – order_status_updated with newStatus completed/delivered/fulfilled
- *   products  – unique metadata.title values seen in the log window
- *   revenue   – stats.revenue is null unless order totals exist in the
- *               activity metadata. A null value renders as "—" with an
- *               explanation, never as a made-up total.
+ *  - Equal-height cards: every card is a full-height flex column and
+ *    the description footer is pinned to the bottom (mt-auto), so a
+ *    two-line description can no longer make one card taller than
+ *    its neighbours.
+ *  - Clearer hierarchy: small uppercase label → large tabular value →
+ *    quiet description, with consistent type sizes at every width.
+ *  - Responsive grid: 1 column on phones, 2 on small screens,
+ *    3 on laptops, 4 on wide desktops — no cramped 4-up row on a
+ *    tablet, no single stretched column on a phone.
+ *  - Numbers use tabular figures so digits don't jitter between cards.
+ *  - revenue is the sum of metadata.totalPrice across order_created
+ *    activities in the loaded window (computed in AdminActivity).
+ *    It is null — rendered as "—" — only when no order totals exist
+ *    in the window. Nothing invented.
  */
 const statConfig = [
 	{ key: 'events', title: 'Loaded Events', icon: Activity, description: 'Activities on this page', tone: 'gold' },
@@ -26,9 +31,10 @@ const statConfig = [
 		key: 'revenue',
 		title: 'Total Revenue',
 		icon: DollarSign,
-		description: 'Order totals are not in the activity log yet',
+		description: 'Order totals in this log window',
 		tone: 'gold',
-		unavailableText: 'Revenue appears here once order totals are included in activity metadata.',
+		unavailableText: 'No order totals in this log window yet.',
+		currency: true,
 	},
 ];
 
@@ -40,7 +46,7 @@ const toneClass = {
 
 export default function ActivityStats({ stats }) {
 	return (
-		<div className='grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4'>
+		<div className='grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4'>
 			{statConfig.map((item, index) => {
 				const Icon = item.icon;
 				const value = stats?.[item.key];
@@ -49,26 +55,32 @@ export default function ActivityStats({ stats }) {
 				return (
 					<div
 						key={item.key}
-						className='group animate-rise rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card transition duration-300 ease-soft hover:-translate-y-1 hover:border-white/20 hover:shadow-card-hover'
+						className='group flex h-full animate-rise flex-col rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card transition duration-300 ease-soft hover:-translate-y-1 hover:border-white/20 hover:shadow-card-hover sm:p-6'
 						style={{ animationDelay: `${index * 70}ms` }}>
 						<div className='flex items-start justify-between gap-3'>
 							<div className='min-w-0'>
-								<p className='text-sm font-medium text-stone-400'>{item.title}</p>
+								<p className='text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500'>{item.title}</p>
 
-								<h3 className={`mt-3 font-display text-3xl font-bold tracking-tight ${unavailable ? 'text-stone-600' : 'text-stone-50'}`}>
-									{unavailable ? '—' : Number(value).toLocaleString()}
+								<h3
+									className={`mt-3 font-display text-[28px] font-bold leading-none tracking-tight tabular-nums sm:text-3xl ${unavailable ? 'text-stone-600' : 'text-stone-50'}`}
+									title={unavailable ? item.unavailableText || item.description : undefined}>
+									{unavailable
+										? '—'
+										: item.currency
+											? `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+											: Number(value).toLocaleString()}
 								</h3>
 							</div>
 
-							<span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${toneClass[item.tone]}`}>
+							<span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 ${toneClass[item.tone]}`}>
 								<Icon
-									size={22}
+									size={21}
 									aria-hidden='true'
 								/>
 							</span>
 						</div>
 
-						<div className='mt-5 flex items-start gap-2 border-t border-white/5 pt-4'>
+						<div className='mt-auto flex items-start gap-2 border-t border-white/5 pt-4'>
 							<TrendingUp
 								size={15}
 								className={`mt-0.5 shrink-0 ${unavailable ? 'text-stone-600' : 'text-emerald-400'}`}

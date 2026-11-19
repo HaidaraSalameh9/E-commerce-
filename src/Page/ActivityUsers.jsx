@@ -1,11 +1,90 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@clerk/react';
-import { Search, Users, RefreshCw, ChevronRight, UserRound, Menu } from 'lucide-react';
+import { Search, X, Users, RefreshCw, ChevronRight, UserRound, Menu } from 'lucide-react';
 
 import UserActivityModal from '../components/admin/UserActivityModal';
 import ActivitySidebar from '../components/admin/ActivitySidbar';
 import { getAllUserActivities } from '../services/adminActivityService';
 import useSidebarState from '../components/admin/Useactivitysidebar';
+
+/* ------------------------------------------------------------------
+ * User profile helpers (duplicated in the other Activity files —
+ * each file is self-contained, no shared helper module).
+ *
+ * The backend stores the customer snapshot on each activity under
+ * `customer` ({ name, email, imageUrl }); `user` is checked first in
+ * case a future response maps it. Placeholder values the backend
+ * writes when its Clerk lookup fails ("Unknown Customer",
+ * "Unnamed User", "No email") and any value that IS the user ID are
+ * treated as missing — User IDs are never displayed or searched.
+ * ------------------------------------------------------------------ */
+const UNKNOWN_CUSTOMER_LABEL = 'Unknown customer';
+const NO_EMAIL_LABEL = 'No email on file';
+const PLACEHOLDER_EMAILS = new Set(['no email', 'no-email', 'unknown', 'n/a', 'na', '—', '-']);
+const PLACEHOLDER_NAMES = new Set(['unknown customer', 'unnamed user', 'unknown user', 'customer', 'unknown', 'n/a', '—', '-']);
+
+function cleanProfileValue(value) {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
+function isIdLikeValue(value, userId) {
+	const v = cleanProfileValue(value);
+	if (!v) return true;
+	if (userId && v === userId) return true;
+	return /^user_[A-Za-z0-9]+$/.test(v);
+}
+
+function getDisplayName(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const joinedName = [cleanProfileValue(user.firstName), cleanProfileValue(user.lastName)].filter(Boolean).join(' ') || null;
+	for (const candidate of [user.name, user.fullName, joinedName, user.username]) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_NAMES.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayEmail(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const candidates = [
+		user.email,
+		user.emailAddress,
+		user.primaryEmailAddress?.emailAddress,
+		user.primaryEmail?.emailAddress,
+		Array.isArray(user.emailAddresses) ? user.emailAddresses[0]?.emailAddress : null,
+	];
+	for (const candidate of candidates) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_EMAILS.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayImage(user) {
+	if (!user || typeof user !== 'object') return null;
+	return cleanProfileValue(user.imageUrl) || cleanProfileValue(user.profileImageUrl) || cleanProfileValue(user.image) || cleanProfileValue(user.avatarUrl) || null;
+}
+
+function normalizeActivityUser(user, userId) {
+	return {
+		name: getDisplayName(user, userId),
+		email: getDisplayEmail(user, userId),
+		imageUrl: getDisplayImage(user),
+	};
+}
+
+function getActivityCustomer(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	return activity.user || activity.customer || null;
+}
 
 function formatDate(date) {
 	if (!date) return 'Unknown';
@@ -79,27 +158,34 @@ export default function ActivityUsers() {
 		activities.forEach((activity) => {
 			if (!activity.userId) return;
 
+			// Resolve display-safe profile data up front. If the API sent
+			// an ID (or a placeholder like "No email") where a name/email
+			// belongs, the helper returns null instead of leaking the ID
+			// into the UI. userId is kept ONLY as the internal map key
+			// and for the per-user API call — it is never rendered.
+			const profile = normalizeActivityUser(getActivityCustomer(activity), activity.userId);
 			const existing = usersMap.get(activity.userId);
 
 			if (!existing) {
 				usersMap.set(activity.userId, {
 					userId: activity.userId,
-					// Carry Clerk profile from the activity.user object (enriched by backend)
-					name: activity.user?.name || null,
-					email: activity.user?.email || null,
-					imageUrl: activity.user?.imageUrl || null,
+					name: profile.name,
+					email: profile.email,
+					imageUrl: profile.imageUrl,
 					activityCount: 1,
 					lastActivity: activity.createdAt,
 				});
 			} else {
 				existing.activityCount += 1;
 
-				// Upgrade name/email if we now have a richer profile
-				if (!existing.name && activity.user?.name) {
-					existing.name = activity.user.name;
-					existing.email = activity.user.email || existing.email;
-					existing.imageUrl = activity.user.imageUrl || existing.imageUrl;
-				}
+				// Fill in any missing profile fields from later activities.
+				// Each field upgrades independently — previously email and
+				// avatar only upgraded when the name was missing, so a user
+				// whose first activity had a name but no email stayed
+				// email-less forever.
+				if (!existing.name && profile.name) existing.name = profile.name;
+				if (!existing.email && profile.email) existing.email = profile.email;
+				if (!existing.imageUrl && profile.imageUrl) existing.imageUrl = profile.imageUrl;
 
 				if (new Date(activity.createdAt) > new Date(existing.lastActivity)) {
 					existing.lastActivity = activity.createdAt;
@@ -112,14 +198,16 @@ export default function ActivityUsers() {
 		return Array.from(usersMap.values())
 			.filter((user) => {
 				if (!searchLower) return true;
-				return (
-					user.userId.toLowerCase().includes(searchLower) ||
+				// Search matches FULL NAME or EMAIL only — never User ID.
+				return Boolean(
 					(user.name && user.name.toLowerCase().includes(searchLower)) ||
-					(user.email && user.email.toLowerCase().includes(searchLower))
+						(user.email && user.email.toLowerCase().includes(searchLower)),
 				);
 			})
 			.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 	}, [activities, search]);
+
+	const searchTerm = search.trim();
 
 	return (
 		<div className='min-h-screen bg-[#0a0a09] text-stone-100'>
@@ -188,30 +276,30 @@ export default function ActivityUsers() {
 						</button>
 					</div>
 
-					<div className='grid grid-cols-1 gap-5 sm:grid-cols-2'>
-						<div className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card'>
+					<div className='grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5'>
+						<div className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6'>
 							<div className='flex items-center justify-between'>
-								<p className='text-sm text-stone-400'>Users Found</p>
+								<p className='text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500'>Users Found</p>
 								<Users
 									className='text-brass-300'
 									size={21}
 									aria-hidden='true'
 								/>
 							</div>
-							<h3 className='mt-3 font-display text-3xl font-bold text-stone-50'>{users.length}</h3>
+							<h3 className='mt-3 font-display text-3xl font-bold tabular-nums text-stone-50'>{users.length}</h3>
 							<p className='mt-2 text-xs text-stone-500'>In the activities loaded so far</p>
 						</div>
 
-						<div className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card'>
+						<div className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6'>
 							<div className='flex items-center justify-between'>
-								<p className='text-sm text-stone-400'>Activities Loaded</p>
+								<p className='text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500'>Activities Loaded</p>
 								<RefreshCw
 									className='text-emerald-400'
 									size={21}
 									aria-hidden='true'
 								/>
 							</div>
-							<h3 className='mt-3 font-display text-3xl font-bold text-stone-50'>{activities.length}</h3>
+							<h3 className='mt-3 font-display text-3xl font-bold tabular-nums text-stone-50'>{activities.length}</h3>
 							<p className='mt-2 text-xs text-stone-500'>Across all loaded pages</p>
 						</div>
 					</div>
@@ -230,13 +318,28 @@ export default function ActivityUsers() {
 									aria-hidden='true'
 								/>
 								<input
-									type='text'
+									type='search'
+									autoComplete='off'
+									inputMode='search'
 									value={search}
 									onChange={(e) => setSearch(e.target.value)}
-									placeholder='Search by name, email, or user ID...'
-									aria-label='Search users'
-									className='h-10 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-brass-400 focus:bg-white/[0.06] focus:ring-4 focus:ring-brass-400/15'
+									placeholder='Search by full name or email...'
+									aria-label='Search users by full name or email'
+									className='h-10 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-10 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-brass-400 focus:bg-white/[0.06] focus:ring-4 focus:ring-brass-400/15'
 								/>
+
+								{search && (
+									<button
+										type='button'
+										onClick={() => setSearch('')}
+										aria-label='Clear search'
+										className='absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-stone-500 transition hover:bg-white/10 hover:text-stone-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brass-400'>
+										<X
+											size={14}
+											aria-hidden='true'
+										/>
+									</button>
+								)}
 							</div>
 						</div>
 
@@ -249,11 +352,10 @@ export default function ActivityUsers() {
 						)}
 
 						<div className='overflow-x-auto'>
-							<table className='w-full min-w-[750px] text-left'>
+							<table className='w-full min-w-[640px] text-left'>
 								<thead>
 									<tr className='border-b border-white/5 text-xs uppercase tracking-wider text-stone-500'>
 										<th className='px-6 py-4'>Customer</th>
-										<th className='px-6 py-4'>Name / Email</th>
 										<th className='px-6 py-4'>Activities</th>
 										<th className='px-6 py-4'>Last Activity</th>
 										<th className='px-6 py-4 text-right'>Details</th>
@@ -262,24 +364,46 @@ export default function ActivityUsers() {
 
 								<tbody className='divide-y divide-white/5'>
 									{loading ? (
-										<tr>
-											<td
-												colSpan='5'
-												className='px-6 py-12 text-center text-sm text-stone-500'>
-												Loading users...
-											</td>
-										</tr>
+										Array.from({ length: 4 }).map((_, index) => (
+											<tr key={index}>
+												<td className='px-6 py-4'>
+													<div className='flex items-center gap-3'>
+														<div className='h-10 w-10 shrink-0 animate-pulse rounded-full bg-white/10' />
+														<div className='min-w-0 flex-1 space-y-2'>
+															<div className='h-3.5 w-32 animate-pulse rounded bg-white/10' />
+															<div className='h-3 w-44 animate-pulse rounded bg-white/5' />
+														</div>
+													</div>
+												</td>
+												<td className='px-6 py-4'>
+													<div className='h-6 w-10 animate-pulse rounded-lg bg-white/5' />
+												</td>
+												<td className='px-6 py-4'>
+													<div className='h-3.5 w-28 animate-pulse rounded bg-white/5' />
+												</td>
+												<td className='px-6 py-4'>
+													<div className='ml-auto h-8 w-24 animate-pulse rounded-lg bg-white/5' />
+												</td>
+											</tr>
+										))
 									) : users.length === 0 ? (
 										<tr>
 											<td
-												colSpan='5'
+												colSpan='4'
 												className='px-6 py-12 text-center'>
 												<UserRound
 													className='mx-auto text-stone-600'
 													size={30}
 													aria-hidden='true'
 												/>
-												<p className='mt-3 text-sm text-stone-400'>No users found.</p>
+												<p className='mt-3 text-sm font-medium text-stone-300'>
+													{searchTerm ? 'No users match your search.' : 'No users found.'}
+												</p>
+												{searchTerm && (
+													<p className='mx-auto mt-1 max-w-sm text-xs leading-relaxed text-stone-500'>
+														Nothing matches “{searchTerm}” in the loaded activities. Search matches full name or email only.
+													</p>
+												)}
 											</td>
 										</tr>
 									) : (
@@ -287,14 +411,14 @@ export default function ActivityUsers() {
 											<tr
 												key={user.userId}
 												className='transition hover:bg-white/[0.03]'>
-												{/* Avatar + User ID */}
+												{/* Avatar + full name + personal email (never User ID) */}
 												<td className='px-6 py-4'>
 													<div className='flex items-center gap-3'>
 														{user.imageUrl ? (
 															<img
 																src={user.imageUrl}
-																alt={user.name || 'Customer'}
-																className='h-10 w-10 rounded-full object-cover'
+																alt={user.name || UNKNOWN_CUSTOMER_LABEL}
+																className='h-10 w-10 shrink-0 rounded-full object-cover'
 															/>
 														) : (
 															<div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brass-300 to-brass-500 text-sm font-bold text-ink'>
@@ -302,23 +426,23 @@ export default function ActivityUsers() {
 															</div>
 														)}
 														<div className='min-w-0'>
-															<p className='truncate text-sm font-semibold text-stone-100'>{user.name || 'Customer'}</p>
-															<p className='mt-0.5 truncate font-mono text-xs text-stone-500'>{user.userId}</p>
+															<p
+																className='truncate text-sm font-semibold text-stone-100'
+																title={user.name || undefined}>
+																{user.name || UNKNOWN_CUSTOMER_LABEL}
+															</p>
+															<p
+																className='mt-0.5 truncate text-xs text-stone-500'
+																title={user.email || undefined}>
+																{user.email || NO_EMAIL_LABEL}
+															</p>
 														</div>
 													</div>
 												</td>
 
-												{/* Name + Email column */}
-												<td className='px-6 py-4'>
-													<p className='text-sm text-stone-300'>
-														{user.name ? user.name : <em className='text-stone-500'>No name</em>}
-													</p>
-													<p className='mt-0.5 text-xs text-stone-500'>{user.email || '—'}</p>
-												</td>
-
 												{/* Activity count */}
 												<td className='px-6 py-4'>
-													<span className='rounded-lg bg-brass-400/10 px-3 py-1.5 text-xs font-semibold text-brass-300'>
+													<span className='rounded-lg bg-brass-400/10 px-3 py-1.5 text-xs font-semibold tabular-nums text-brass-300'>
 														{user.activityCount}
 													</span>
 												</td>

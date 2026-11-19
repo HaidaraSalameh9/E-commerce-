@@ -1,10 +1,13 @@
 import { Search, SlidersHorizontal, X, CalendarDays } from 'lucide-react';
 
 /**
- * ActivityFilters — same props as before, same activity types.
- * Only the skin changed: dark inputs on the charcoal card, gold focus
- * rings. The date picker's native indicator is inverted so it stays
- * visible on the dark field.
+ * ActivityFilters — same props as before, plus one optional prop:
+ *   resultCount – when provided, shows how many activities match the
+ *                 current filters. Omit it and nothing changes.
+ *
+ * Search behaviour: the text field searches users by FULL NAME or
+ * EMAIL only (enforced in AdminActivity via matchesUserSearch).
+ * User IDs are not searchable and are never shown in this UI.
  */
 const activityTypes = [
 	{ label: 'All Activities', value: 'all' },
@@ -20,7 +23,7 @@ const activityTypes = [
 const fieldClass =
 	'h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] text-sm text-stone-100 outline-none transition duration-300 placeholder:text-stone-600 focus:border-brass-400 focus:bg-white/[0.06] focus:ring-4 focus:ring-brass-400/15 [&_option]:bg-[#161613] [&_option]:text-stone-100 [color-scheme:dark]';
 
-export default function ActivityFilters({ search, setSearch, type, setType, date, setDate }) {
+export default function ActivityFilters({ search, setSearch, type, setType, date, setDate, resultCount }) {
 	const clearFilters = () => {
 		setSearch('');
 		setType('all');
@@ -31,7 +34,7 @@ export default function ActivityFilters({ search, setSearch, type, setType, date
 
 	return (
 		<div className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6'>
-			<div className='mb-5 flex items-center justify-between'>
+			<div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
 				<div className='flex items-center gap-2'>
 					<SlidersHorizontal
 						size={18}
@@ -40,6 +43,14 @@ export default function ActivityFilters({ search, setSearch, type, setType, date
 					/>
 
 					<h2 className='font-display text-sm font-bold text-stone-100'>Filter Activities</h2>
+
+					{typeof resultCount === 'number' && (
+						<span
+							aria-live='polite'
+							className='rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-medium text-stone-400'>
+							{resultCount} {resultCount === 1 ? 'result' : 'results'}
+						</span>
+					)}
 				</div>
 
 				{hasFilters && (
@@ -57,7 +68,7 @@ export default function ActivityFilters({ search, setSearch, type, setType, date
 			</div>
 
 			<div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
-				{/* Search */}
+				{/* Search — full name or email only, never User ID */}
 				<div>
 					<label
 						htmlFor='activity-search'
@@ -74,13 +85,30 @@ export default function ActivityFilters({ search, setSearch, type, setType, date
 
 						<input
 							id='activity-search'
-							type='text'
+							type='search'
+							autoComplete='off'
+							inputMode='search'
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							placeholder='Search by name, email or User ID...'
-							className={`${fieldClass} pl-10 pr-3`}
+							placeholder='Search by full name or email...'
+							className={`${fieldClass} pl-10 pr-10`}
 						/>
+
+						{search && (
+							<button
+								type='button'
+								onClick={() => setSearch('')}
+								aria-label='Clear search'
+								className='absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-stone-500 transition hover:bg-white/10 hover:text-stone-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brass-400'>
+								<X
+									size={14}
+									aria-hidden='true'
+								/>
+							</button>
+						)}
 					</div>
+
+					<p className='mt-2 text-[11px] leading-relaxed text-stone-600'>Matches full name or email only.</p>
 				</div>
 
 				{/* Type */}

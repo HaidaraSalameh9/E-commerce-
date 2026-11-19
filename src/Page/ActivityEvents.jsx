@@ -1,11 +1,105 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/react';
-import { RefreshCw, Search, ChevronLeft, ChevronRight, Activity, ShoppingBag, ShoppingCart, Clock, Menu } from 'lucide-react';
+import { RefreshCw, Search, X, ChevronLeft, ChevronRight, Activity, ShoppingBag, ShoppingCart, Clock, Menu } from 'lucide-react';
 
 import { getAllUserActivities } from '../services/adminActivityService';
 import ActivitySidebar from '../components/admin/ActivitySidbar';
 import EventDetailsDrawer from '../components/admin/EventDetailsDrawer';
 import useSidebarState from '../components/admin/Useactivitysidebar';
+
+/* ------------------------------------------------------------------
+ * User profile helpers (duplicated in the other Activity files —
+ * each file is self-contained, no shared helper module).
+ *
+ * The backend stores the customer snapshot on each activity under
+ * `customer` ({ name, email, imageUrl }); `user` is checked first in
+ * case a future response maps it. Placeholder values the backend
+ * writes when its Clerk lookup fails ("Unknown Customer",
+ * "Unnamed User", "No email") and any value that IS the user ID are
+ * treated as missing — User IDs are never displayed or searched.
+ * ------------------------------------------------------------------ */
+const UNKNOWN_CUSTOMER_LABEL = 'Unknown customer';
+const NO_EMAIL_LABEL = 'No email on file';
+const PLACEHOLDER_EMAILS = new Set(['no email', 'no-email', 'unknown', 'n/a', 'na', '—', '-']);
+const PLACEHOLDER_NAMES = new Set(['unknown customer', 'unnamed user', 'unknown user', 'customer', 'unknown', 'n/a', '—', '-']);
+
+function cleanProfileValue(value) {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
+function isIdLikeValue(value, userId) {
+	const v = cleanProfileValue(value);
+	if (!v) return true;
+	if (userId && v === userId) return true;
+	return /^user_[A-Za-z0-9]+$/.test(v);
+}
+
+function getDisplayName(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const joinedName = [cleanProfileValue(user.firstName), cleanProfileValue(user.lastName)].filter(Boolean).join(' ') || null;
+	for (const candidate of [user.name, user.fullName, joinedName, user.username]) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_NAMES.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayEmail(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const candidates = [
+		user.email,
+		user.emailAddress,
+		user.primaryEmailAddress?.emailAddress,
+		user.primaryEmail?.emailAddress,
+		Array.isArray(user.emailAddresses) ? user.emailAddresses[0]?.emailAddress : null,
+	];
+	for (const candidate of candidates) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_EMAILS.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayImage(user) {
+	if (!user || typeof user !== 'object') return null;
+	return cleanProfileValue(user.imageUrl) || cleanProfileValue(user.profileImageUrl) || cleanProfileValue(user.image) || cleanProfileValue(user.avatarUrl) || null;
+}
+
+function normalizeActivityUser(user, userId) {
+	return {
+		name: getDisplayName(user, userId),
+		email: getDisplayEmail(user, userId),
+		imageUrl: getDisplayImage(user),
+	};
+}
+
+function getActivityCustomer(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	return activity.user || activity.customer || null;
+}
+
+function getActivityActor(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	if (activity.actor) return activity.actor;
+	if (activity.actorUserId && activity.actorUserId === activity.userId) return getActivityCustomer(activity);
+	return null;
+}
+
+// User search: full name or email only — never User ID.
+function matchesUserSearch(user, userId, query) {
+	const q = cleanProfileValue(query)?.toLowerCase();
+	if (!q) return true;
+	const { name, email } = normalizeActivityUser(user, userId);
+	return Boolean((name && name.toLowerCase().includes(q)) || (email && email.toLowerCase().includes(q)));
+}
 
 const PAGE_SIZE = 20;
 
@@ -133,16 +227,19 @@ export default function ActivityEvents() {
 		loadActivities(null);
 	}
 
-	const filteredActivities = activities.filter((activity) => {
-		const searchValue = search.trim().toLowerCase();
+	const searchTerm = search.trim();
 
+	const filteredActivities = activities.filter((activity) => {
+		const searchValue = searchTerm.toLowerCase();
+
+		// User search matches FULL NAME or EMAIL only — for the customer
+		// and for the admin who performed the action. User IDs are not
+		// searchable. Order-number search is kept: it is an existing
+		// feature and not a user identifier.
 		const matchesSearch =
 			!searchValue ||
-			activity.userId?.toLowerCase().includes(searchValue) ||
-			activity.user?.name?.toLowerCase().includes(searchValue) ||
-			activity.user?.email?.toLowerCase().includes(searchValue) ||
-			activity.actor?.name?.toLowerCase().includes(searchValue) ||
-			activity.actor?.email?.toLowerCase().includes(searchValue) ||
+			matchesUserSearch(getActivityCustomer(activity), activity.userId, searchValue) ||
+			matchesUserSearch(getActivityActor(activity), activity.actorUserId, searchValue) ||
 			activity.metadata?.orderNumber?.toLowerCase().includes(searchValue);
 
 		const matchesType = type === 'all' || (type === 'order' && activity.type?.startsWith('order_')) || (type === 'cart' && activity.type?.startsWith('cart_')) || activity.type === type;
@@ -230,13 +327,28 @@ export default function ActivityEvents() {
 							/>
 
 							<input
-								type='text'
+								type='search'
+								autoComplete='off'
+								inputMode='search'
 								value={search}
 								onChange={(e) => setSearch(e.target.value)}
-								placeholder='Search User Name, Email, ID or Order...'
+								placeholder='Search by name, email, or order number...'
 								aria-label='Search events'
-								className='h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-4 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-brass-400 focus:bg-white/[0.06] focus:ring-4 focus:ring-brass-400/15'
+								className='h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-10 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-brass-400 focus:bg-white/[0.06] focus:ring-4 focus:ring-brass-400/15'
 							/>
+
+							{search && (
+								<button
+									type='button'
+									onClick={() => setSearch('')}
+									aria-label='Clear search'
+									className='absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-stone-500 transition hover:bg-white/10 hover:text-stone-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brass-400'>
+									<X
+										size={14}
+										aria-hidden='true'
+									/>
+								</button>
+							)}
 						</div>
 
 						<select
@@ -318,13 +430,22 @@ export default function ActivityEvents() {
 
 												<p className='mt-3 text-sm font-medium text-stone-300'>No events found</p>
 
-												<p className='mt-1 text-xs text-stone-500'>Try changing your search or filters.</p>
+												<p className='mx-auto mt-1 max-w-sm text-xs leading-relaxed text-stone-500'>
+													{searchTerm
+														? `Nothing on this page matches “${searchTerm}”. Search matches full name, email, or order number.`
+														: 'Try changing your search or filters.'}
+												</p>
 											</td>
 										</tr>
 									) : (
 										filteredActivities.map((activity) => {
 											const event = getEventInfo(activity.type);
 											const EventIcon = event.icon;
+
+											// Display-safe profile: real full name + personal
+											// email. Never falls back to a User ID.
+											const customer = normalizeActivityUser(getActivityCustomer(activity), activity.userId);
+											const actor = normalizeActivityUser(getActivityActor(activity), activity.actorUserId);
 
 											return (
 												<tr
@@ -343,17 +464,19 @@ export default function ActivityEvents() {
 
 													<td className='px-6 py-5'>
 														<div className='min-w-0 max-w-[220px]'>
-															<p className='truncate text-xs font-semibold text-stone-100'>
-																{activity.user?.name || 'Customer'}
+															<p
+																className='truncate text-xs font-semibold text-stone-100'
+																title={customer.name || undefined}>
+																{customer.name || UNKNOWN_CUSTOMER_LABEL}
 															</p>
-															<p className='truncate text-[11px] text-stone-500'>
-																{activity.user?.email && activity.user.email !== 'No email'
-																	? activity.user.email
-																	: activity.userId || '—'}
+															<p
+																className='truncate text-[11px] text-stone-500'
+																title={customer.email || undefined}>
+																{customer.email || NO_EMAIL_LABEL}
 															</p>
 															{activity.actorUserId && activity.actorUserId !== activity.userId && (
 																<span className='mt-1 inline-block rounded bg-brass-400/10 px-1.5 py-0.5 text-[10px] font-medium text-brass-300'>
-																	By: {activity.actor?.name || 'Admin'}
+																	By: {actor.name || 'Admin'}
 																</span>
 															)}
 														</div>

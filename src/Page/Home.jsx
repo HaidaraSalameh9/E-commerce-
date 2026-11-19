@@ -8,7 +8,7 @@ import useCatalog from '../hooks/useCatalog';
 import { selectNewArrivals } from '../utils/catalogSelectors';
 
 const Home = () => {
-	// One load for the whole page. DummyJSON is switched on when Best Rated is added.
+	// One load for the whole page.
 	const { custom, retryCustom } = useCatalog({ dummyJson: false });
 
 	const newArrivals = useMemo(() => selectNewArrivals(custom.products), [custom.products]);
@@ -30,4 +30,3 @@ const Home = () => {
 };
 
 export default Home;
-

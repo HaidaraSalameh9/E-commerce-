@@ -9,6 +9,92 @@ import ActivityTimeline from '../components/admin/ActivityTimeline';
 import ActivityFilters from '../components/admin/ActivityFilters';
 import useSidebarState from '../components/admin/Useactivitysidebar';
 
+/* ------------------------------------------------------------------
+ * User profile helpers (duplicated in the other Activity files —
+ * each file is self-contained, no shared helper module).
+ *
+ * The backend stores the customer snapshot on each activity under
+ * `customer` ({ name, email, imageUrl }); `user` is checked first in
+ * case a future response maps it. Placeholder values the backend
+ * writes when its Clerk lookup fails ("Unknown Customer",
+ * "Unnamed User", "No email") and any value that IS the user ID are
+ * treated as missing — User IDs are never displayed or searched.
+ * ------------------------------------------------------------------ */
+const PLACEHOLDER_EMAILS = new Set(['no email', 'no-email', 'unknown', 'n/a', 'na', '—', '-']);
+const PLACEHOLDER_NAMES = new Set(['unknown customer', 'unnamed user', 'unknown user', 'customer', 'unknown', 'n/a', '—', '-']);
+
+function cleanProfileValue(value) {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
+function isIdLikeValue(value, userId) {
+	const v = cleanProfileValue(value);
+	if (!v) return true;
+	if (userId && v === userId) return true;
+	return /^user_[A-Za-z0-9]+$/.test(v);
+}
+
+function getDisplayName(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const joinedName = [cleanProfileValue(user.firstName), cleanProfileValue(user.lastName)].filter(Boolean).join(' ') || null;
+	for (const candidate of [user.name, user.fullName, joinedName, user.username]) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_NAMES.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayEmail(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const candidates = [
+		user.email,
+		user.emailAddress,
+		user.primaryEmailAddress?.emailAddress,
+		user.primaryEmail?.emailAddress,
+		Array.isArray(user.emailAddresses) ? user.emailAddresses[0]?.emailAddress : null,
+	];
+	for (const candidate of candidates) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_EMAILS.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getActivityCustomer(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	return activity.user || activity.customer || null;
+}
+
+// User search: full name or email only — never User ID.
+function matchesUserSearch(user, userId, query) {
+	const q = cleanProfileValue(query)?.toLowerCase();
+	if (!q) return true;
+	const name = getDisplayName(user, userId);
+	const email = getDisplayEmail(user, userId);
+	return Boolean((name && name.toLowerCase().includes(q)) || (email && email.toLowerCase().includes(q)));
+}
+
+// Product titles across every metadata shape the backend writes:
+// cart events use metadata.productTitle, orders use
+// metadata.products[].title (metadata.title kept for safety).
+function getActivityProductTitles(activity) {
+	const metadata = activity?.metadata;
+	if (!metadata || typeof metadata !== 'object') return [];
+	const titles = [metadata.title, metadata.productTitle];
+	if (Array.isArray(metadata.products)) {
+		for (const product of metadata.products) titles.push(product?.title);
+	}
+	return [...new Set(titles.map(cleanProfileValue).filter(Boolean))];
+}
+
 function shortDay(date) {
 	return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(date);
 }
@@ -66,10 +152,11 @@ export default function AdminActivity() {
 	}, [getToken]);
 
 	// Every number below is derived from the loaded activities only.
-	// Revenue stays null here: order totals do not exist in the activity
-	// log, so ActivityStats renders "—" with an explanation instead of
-	// an invented total. If metadata gains a total/amount field later,
-	// sum it here and pass it as stats.revenue — no other change needed.
+	// Revenue: order_created activities DO carry metadata.totalPrice
+	// (written by createOrder in functions/index.js), so revenue is
+	// the sum of order totals in this loaded window. It stays null —
+	// rendered as "—" — only if no order totals exist at all, so the
+	// card never shows an invented number.
 	const stats = useMemo(() => {
 		const orderActivities = activities.filter((activity) => activity.type?.startsWith('order_'));
 		const created = orderActivities.filter((activity) => activity.type === 'order_created');
@@ -79,6 +166,10 @@ export default function AdminActivity() {
 				['completed', 'delivered', 'fulfilled'].includes((activity.metadata?.newStatus || '').toLowerCase()),
 		).length;
 
+		const orderTotals = created
+			.map((activity) => Number(activity.metadata?.totalPrice))
+			.filter((value) => Number.isFinite(value) && value >= 0);
+
 		return {
 			events: activities.length,
 			users: new Set(activities.map((activity) => activity.userId).filter(Boolean)).size,
@@ -86,8 +177,10 @@ export default function AdminActivity() {
 			cart: activities.filter((activity) => activity.type?.startsWith('cart_')).length,
 			pending: Math.max(0, created.length - completed),
 			completed,
-			products: new Set(activities.map((activity) => activity.metadata?.title).filter(Boolean)).size,
-			revenue: null,
+			// Titles come from metadata.productTitle (cart events) and
+			// metadata.products[].title (orders) — see helpers above.
+			products: new Set(activities.flatMap((activity) => getActivityProductTitles(activity))).size,
+			revenue: orderTotals.length > 0 ? Math.round(orderTotals.reduce((sum, value) => sum + value, 0) * 100) / 100 : null,
 		};
 	}, [activities]);
 
@@ -110,12 +203,14 @@ export default function AdminActivity() {
 		return days;
 	}, [activities]);
 
-	// Most-mentioned product titles in carts and orders.
+	// Most-mentioned product titles in carts and orders. Each title
+	// counts once per activity (an order with 3 products mentions
+	// each of them once).
 	const bestSellers = useMemo(() => {
 		const counts = new Map();
 		for (const activity of activities) {
-			const title = activity.metadata?.title;
-			if (title && (activity.type === 'cart_added' || activity.type === 'order_created')) {
+			if (activity.type !== 'cart_added' && activity.type !== 'order_created') continue;
+			for (const title of getActivityProductTitles(activity)) {
 				counts.set(title, (counts.get(title) || 0) + 1);
 			}
 		}
@@ -127,6 +222,7 @@ export default function AdminActivity() {
 
 	const trendMax = Math.max(1, ...trend.map((day) => day.value));
 	const bestMax = Math.max(1, ...bestSellers.map((item) => item.count));
+	const trendTotal = trend.reduce((sum, day) => sum + day.value, 0);
 
 	async function handleRefresh() {
 		try {
@@ -145,7 +241,10 @@ export default function AdminActivity() {
 
 	const filteredActivities = useMemo(() => {
 		return activities.filter((activity) => {
-			const matchesSearch = !search || activity.userId?.toLowerCase().includes(search.toLowerCase()) || activity.user?.name?.toLowerCase().includes(search.toLowerCase()) || activity.user?.email?.toLowerCase().includes(search.toLowerCase());
+			// User search matches the customer's FULL NAME or EMAIL only.
+			// User IDs are deliberately not searchable (see helpers above).
+			// An empty or whitespace-only search matches everything.
+			const matchesSearch = matchesUserSearch(getActivityCustomer(activity), activity.userId, search);
 
 			const matchesType = type === 'all' || (type === 'order' && activity.type?.startsWith('order_')) || (type === 'cart' && activity.type?.startsWith('cart_')) || activity.type === type;
 
@@ -194,158 +293,182 @@ export default function AdminActivity() {
 					</span>
 				</header>
 
-				{/* Content */}
+				{/* Content — capped width so cards keep sane proportions on
+				    very wide screens; full-bleed on smaller ones. */}
 				<div
-					className='space-y-8 p-4 sm:p-8'
+					className='p-4 sm:p-6 lg:p-8'
 					style={{
 						backgroundImage:
 							'radial-gradient(60% 40% at 85% 0%, rgba(212,175,55,0.08), transparent 65%), linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
 						backgroundSize: 'auto, 56px 56px, 56px 56px',
 					}}>
-					<div className='flex flex-wrap items-center justify-between gap-4'>
-						<div>
-							<p className='text-[11px] font-bold tracking-[0.22em] text-brass-300'>PULSE · ACTIVITY CENTER</p>
-							<h1 className='mt-2 animate-rise font-display text-2xl font-bold tracking-tight text-stone-50 sm:text-3xl'>Activity Overview</h1>
+					<div className='mx-auto w-full max-w-[1600px] space-y-6 sm:space-y-8'>
+						<div className='flex flex-wrap items-start justify-between gap-4'>
+							<div className='min-w-0'>
+								<p className='text-[11px] font-bold tracking-[0.22em] text-brass-300'>PULSE · ACTIVITY CENTER</p>
+								<h1 className='mt-2 animate-rise font-display text-2xl font-bold tracking-tight text-stone-50 sm:text-3xl'>Activity Overview</h1>
 
-							<p
-								className='mt-2 animate-rise text-sm text-stone-400'
-								style={{ animationDelay: '60ms' }}>
-								Monitor customer behavior and track everything happening across your store.
-							</p>
-						</div>
-
-						<button
-							type='button'
-							onClick={handleRefresh}
-							disabled={loading}
-							className='flex items-center gap-2 rounded-xl bg-gradient-to-r from-brass-300 to-brass-500 px-4 py-2.5 text-sm font-semibold text-ink shadow-lg shadow-brass-500/20 transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass-500 disabled:cursor-not-allowed disabled:opacity-60'>
-							<RefreshCw
-								size={16}
-								className={loading ? 'animate-spin' : ''}
-								aria-hidden='true'
-							/>
-							Refresh
-						</button>
-					</div>
-
-					{/* Error */}
-					{error && (
-						<div
-							role='alert'
-							className='rounded-xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-300'>
-							{error}
-						</div>
-					)}
-
-					{/* Statistics */}
-					{loading ? (
-						<div
-							role='status'
-							aria-live='polite'
-							className='grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4'>
-							<span className='sr-only'>Loading activity...</span>
-							{[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
-								<div
-									key={item}
-									className='h-40 animate-pulse rounded-card border border-white/10 bg-white/5'
-								/>
-							))}
-						</div>
-					) : (
-						<ActivityStats stats={stats} />
-					)}
-
-					{/* Orders trend + best sellers — both from the loaded activities */}
-					<div className='grid grid-cols-1 gap-5 xl:grid-cols-5'>
-						<section className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6 xl:col-span-3'>
-							<div className='mb-5 flex flex-wrap items-start justify-between gap-3'>
-								<div>
-									<h2 className='font-display text-lg font-bold text-stone-100'>Orders trend</h2>
-									<p className='mt-1 text-xs text-stone-500'>Orders created per day · last 14 days</p>
-								</div>
-								<span className='flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-2 text-xs text-stone-400'>
-									<TrendingUp
-										size={14}
-										className='text-brass-300'
-										aria-hidden='true'
-									/>
-									{trend.reduce((sum, day) => sum + day.value, 0)} orders in period
-								</span>
+								<p
+									className='mt-2 max-w-xl animate-rise text-sm leading-relaxed text-stone-400'
+									style={{ animationDelay: '60ms' }}>
+									Monitor customer behavior and track everything happening across your store.
+								</p>
 							</div>
 
-							{loading ? (
-								<div className='h-40 animate-pulse rounded-2xl bg-white/5' />
-							) : trend.every((day) => day.value === 0) ? (
-								<div className='flex h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 text-center'>
-									<p className='text-sm font-medium text-stone-300'>No orders in the last 14 days</p>
-									<p className='mt-1 max-w-[280px] text-xs text-stone-500'>New orders will fill this chart automatically.</p>
-								</div>
-							) : (
-								<div className='flex h-40 items-end gap-1.5 sm:gap-2.5'>
-									{trend.map((day) => (
-										<div
-											key={day.key}
-											className='group flex min-w-0 flex-1 flex-col items-center gap-2'>
-											<span className='text-[11px] font-semibold text-stone-300 opacity-0 transition group-hover:opacity-100'>{day.value}</span>
-											<div
-												className='w-full max-w-[36px] rounded-t-lg bg-gradient-to-t from-brass-500 to-brass-300 transition-all duration-300 group-hover:brightness-110'
-												style={{ height: `${Math.max(4, (day.value / trendMax) * 120)}px`, opacity: 0.5 + 0.5 * (day.value / trendMax) }}
-												title={`${day.label}: ${day.value} orders`}
-											/>
-											<span className='truncate text-[9px] text-stone-500 sm:text-[10px]'>{day.label}</span>
+							<button
+								type='button'
+								onClick={handleRefresh}
+								disabled={loading}
+								className='flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-brass-300 to-brass-500 px-4 py-2.5 text-sm font-semibold text-ink shadow-lg shadow-brass-500/20 transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass-500 disabled:cursor-not-allowed disabled:opacity-60'>
+								<RefreshCw
+									size={16}
+									className={loading ? 'animate-spin' : ''}
+									aria-hidden='true'
+								/>
+								Refresh
+							</button>
+						</div>
+
+						{/* Error */}
+						{error && (
+							<div
+								role='alert'
+								className='rounded-xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-300'>
+								{error}
+							</div>
+						)}
+
+						{/* Statistics — skeletons mirror the real card layout so
+						    the grid doesn't jump when data arrives. */}
+						{loading ? (
+							<div
+								role='status'
+								aria-live='polite'
+								className='grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4'>
+								<span className='sr-only'>Loading activity...</span>
+								{[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+									<div
+										key={item}
+										aria-hidden='true'
+										className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6'>
+										<div className='flex items-start justify-between gap-3'>
+											<div className='min-w-0 flex-1 space-y-3'>
+												<div className='h-3 w-24 animate-pulse rounded bg-white/10' />
+												<div className='h-8 w-16 animate-pulse rounded bg-white/10' />
+											</div>
+											<div className='h-11 w-11 shrink-0 animate-pulse rounded-xl bg-white/10 sm:h-12 sm:w-12' />
 										</div>
-									))}
-								</div>
-							)}
-						</section>
+										<div className='mt-6 border-t border-white/5 pt-4'>
+											<div className='h-3 w-full animate-pulse rounded bg-white/5' />
+										</div>
+									</div>
+								))}
+							</div>
+						) : (
+							<ActivityStats stats={stats} />
+						)}
 
-						<section className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6 xl:col-span-2'>
-							<h2 className='font-display text-lg font-bold text-stone-100'>Best-selling products</h2>
-							<p className='mt-1 text-xs text-stone-500'>Most-mentioned products in carts &amp; orders</p>
-
-							{loading ? (
-								<div className='mt-5 h-40 animate-pulse rounded-2xl bg-white/5' />
-							) : bestSellers.length === 0 ? (
-								<div className='mt-5 flex h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 text-center'>
-									<p className='text-sm font-medium text-stone-300'>No product activity yet</p>
-									<p className='mt-1 max-w-[260px] text-xs text-stone-500'>Products will rank here once they appear in carts or orders.</p>
+						{/* Orders trend + best sellers — both from the loaded activities */}
+						<div className='grid grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-5'>
+							<section className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6 xl:col-span-3'>
+								<div className='mb-5 flex flex-wrap items-start justify-between gap-3'>
+									<div>
+										<h2 className='font-display text-lg font-bold text-stone-100'>Orders trend</h2>
+										<p className='mt-1 text-xs text-stone-500'>Orders created per day · last 14 days</p>
+									</div>
+									<span className='flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-2 text-xs tabular-nums text-stone-400'>
+										<TrendingUp
+											size={14}
+											className='text-brass-300'
+											aria-hidden='true'
+										/>
+										{trendTotal} orders in period
+									</span>
 								</div>
-							) : (
-								<ul className='mt-5 space-y-4'>
-									{bestSellers.map((item, index) => (
-										<li key={item.title}>
-											<div className='flex items-baseline justify-between gap-3'>
-												<p className='min-w-0 truncate text-sm font-medium text-stone-100'>
-													<span className='mr-2 font-display font-bold text-brass-300'>{index + 1}.</span>
-													{item.title}
-												</p>
-												<span className='shrink-0 text-xs font-semibold text-stone-400'>
-													{item.count} {item.count === 1 ? 'mention' : 'mentions'}
-												</span>
-											</div>
-											<div className='mt-2 h-2 overflow-hidden rounded-full bg-white/5'>
+
+								{loading ? (
+									<div className='h-44 animate-pulse rounded-2xl bg-white/5' />
+								) : trendTotal === 0 ? (
+									<div className='flex h-44 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center'>
+										<p className='text-sm font-medium text-stone-300'>No orders in the last 14 days</p>
+										<p className='mt-1 max-w-[280px] text-xs leading-relaxed text-stone-500'>New orders will fill this chart automatically.</p>
+									</div>
+								) : (
+									<div
+										role='img'
+										aria-label={`Bar chart of orders created per day over the last 14 days. ${trendTotal} orders in total. Busiest day: ${trend.reduce((best, day) => (day.value > best.value ? day : best), trend[0]).label} with ${trendMax} orders.`}
+										className='flex h-44 items-end gap-1.5 sm:gap-2.5'>
+										{trend.map((day) => (
+											<div
+												key={day.key}
+												className='group flex min-w-0 flex-1 flex-col items-center gap-2'>
+												<span className='text-[11px] font-semibold tabular-nums text-stone-300 opacity-0 transition group-hover:opacity-100'>{day.value}</span>
 												<div
-													className='h-full rounded-full bg-gradient-to-r from-brass-500 to-brass-300'
-													style={{ width: `${(item.count / bestMax) * 100}%` }}
+													className='w-full max-w-[36px] rounded-t-lg bg-gradient-to-t from-brass-500 to-brass-300 transition-all duration-300 group-hover:brightness-110'
+													style={{ height: `${Math.max(4, (day.value / trendMax) * 124)}px`, opacity: 0.5 + 0.5 * (day.value / trendMax) }}
+													title={`${day.label}: ${day.value} orders`}
 												/>
+												<span className='w-full truncate text-center text-[9px] text-stone-500 sm:text-[10px]'>{day.label}</span>
 											</div>
-										</li>
-									))}
-								</ul>
-							)}
-						</section>
+										))}
+									</div>
+								)}
+							</section>
+
+							<section className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] p-5 shadow-card sm:p-6 xl:col-span-2'>
+								<h2 className='font-display text-lg font-bold text-stone-100'>Best-selling products</h2>
+								<p className='mt-1 text-xs text-stone-500'>Most-mentioned products in carts &amp; orders</p>
+
+								{loading ? (
+									<div className='mt-5 h-44 animate-pulse rounded-2xl bg-white/5' />
+								) : bestSellers.length === 0 ? (
+									<div className='mt-5 flex h-44 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center'>
+										<p className='text-sm font-medium text-stone-300'>No product activity yet</p>
+										<p className='mt-1 max-w-[260px] text-xs leading-relaxed text-stone-500'>Products will rank here once they appear in carts or orders.</p>
+									</div>
+								) : (
+									<ul className='mt-5 space-y-4'>
+										{bestSellers.map((item, index) => (
+											<li key={item.title}>
+												<div className='flex items-baseline justify-between gap-3'>
+													<p
+														className='min-w-0 truncate text-sm font-medium text-stone-100'
+														title={item.title}>
+														<span className='mr-2 font-display font-bold tabular-nums text-brass-300'>{index + 1}.</span>
+														{item.title}
+													</p>
+													<span className='shrink-0 text-xs font-semibold tabular-nums text-stone-400'>
+														{item.count} {item.count === 1 ? 'mention' : 'mentions'}
+													</span>
+												</div>
+												<div className='mt-2 h-2 overflow-hidden rounded-full bg-white/5'>
+													<div
+														className='h-full rounded-full bg-gradient-to-r from-brass-500 to-brass-300'
+														style={{ width: `${(item.count / bestMax) * 100}%` }}
+													/>
+												</div>
+											</li>
+										))}
+									</ul>
+								)}
+							</section>
+						</div>
+
+						<ActivityFilters
+							search={search}
+							setSearch={setSearch}
+							type={type}
+							setType={setType}
+							date={date}
+							setDate={setDate}
+							resultCount={loading ? undefined : filteredActivities.length}
+						/>
+
+						<ActivityTimeline
+							activities={filteredActivities}
+							search={search}
+						/>
 					</div>
-
-					<ActivityFilters
-						search={search}
-						setSearch={setSearch}
-						type={type}
-						setType={setType}
-						date={date}
-						setDate={setDate}
-					/>
-
-					<ActivityTimeline activities={filteredActivities} />
 				</div>
 			</main>
 		</div>

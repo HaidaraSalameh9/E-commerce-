@@ -1,6 +1,92 @@
 import { useEffect, useState } from 'react';
 import { X, Activity, UserRound, ShoppingBag, Clock, ShieldCheck, Database } from 'lucide-react';
 
+/* ------------------------------------------------------------------
+ * User profile helpers (duplicated in the other Activity files —
+ * each file is self-contained, no shared helper module).
+ *
+ * The backend stores the customer snapshot on each activity under
+ * `customer` ({ name, email, imageUrl }); `user` is checked first in
+ * case a future response maps it. Placeholder values the backend
+ * writes when its Clerk lookup fails ("Unknown Customer",
+ * "Unnamed User", "No email") and any value that IS the user ID are
+ * treated as missing — User IDs are never displayed or searched.
+ * ------------------------------------------------------------------ */
+const UNKNOWN_CUSTOMER_LABEL = 'Unknown customer';
+const NO_EMAIL_LABEL = 'No email on file';
+const PLACEHOLDER_EMAILS = new Set(['no email', 'no-email', 'unknown', 'n/a', 'na', '—', '-']);
+const PLACEHOLDER_NAMES = new Set(['unknown customer', 'unnamed user', 'unknown user', 'customer', 'unknown', 'n/a', '—', '-']);
+
+function cleanProfileValue(value) {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
+function isIdLikeValue(value, userId) {
+	const v = cleanProfileValue(value);
+	if (!v) return true;
+	if (userId && v === userId) return true;
+	return /^user_[A-Za-z0-9]+$/.test(v);
+}
+
+function getDisplayName(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const joinedName = [cleanProfileValue(user.firstName), cleanProfileValue(user.lastName)].filter(Boolean).join(' ') || null;
+	for (const candidate of [user.name, user.fullName, joinedName, user.username]) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_NAMES.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayEmail(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const candidates = [
+		user.email,
+		user.emailAddress,
+		user.primaryEmailAddress?.emailAddress,
+		user.primaryEmail?.emailAddress,
+		Array.isArray(user.emailAddresses) ? user.emailAddresses[0]?.emailAddress : null,
+	];
+	for (const candidate of candidates) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_EMAILS.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayImage(user) {
+	if (!user || typeof user !== 'object') return null;
+	return cleanProfileValue(user.imageUrl) || cleanProfileValue(user.profileImageUrl) || cleanProfileValue(user.image) || cleanProfileValue(user.avatarUrl) || null;
+}
+
+function normalizeActivityUser(user, userId) {
+	return {
+		name: getDisplayName(user, userId),
+		email: getDisplayEmail(user, userId),
+		imageUrl: getDisplayImage(user),
+	};
+}
+
+function getActivityCustomer(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	return activity.user || activity.customer || null;
+}
+
+function getActivityActor(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	if (activity.actor) return activity.actor;
+	if (activity.actorUserId && activity.actorUserId === activity.userId) return getActivityCustomer(activity);
+	return null;
+}
+
 function formatDate(timestamp) {
 	if (!timestamp) return '—';
 
@@ -18,6 +104,22 @@ function formatPrice(value) {
 	if (value == null || value === '') return null;
 	if (typeof value === 'number') return `$${value.toFixed(2)}`;
 	return String(value);
+}
+
+/**
+ * The raw metadata dump is a debugging aid, but user identifiers must
+ * never be displayed anywhere in this UI — including here. Strip any
+ * user-id-shaped keys before rendering (the stored data is untouched).
+ */
+function redactUserIds(metadata) {
+	if (!metadata || typeof metadata !== 'object') return metadata;
+	const copy = { ...metadata };
+	for (const key of Object.keys(copy)) {
+		if (/^(user|actor|actoruser|customer)id$/i.test(key.replace(/[_-]/g, ''))) {
+			delete copy[key];
+		}
+	}
+	return copy;
 }
 
 function DetailItem({ label, value }) {
@@ -66,6 +168,12 @@ export default function EventDetailsDrawer({ activity, onClose }) {
 	if (!activity) return null;
 
 	const metadata = activity.metadata || {};
+
+	// Display-safe profile data — full name + personal email only.
+	// User IDs are never rendered in this drawer.
+	const customer = normalizeActivityUser(getActivityCustomer(activity), activity.userId);
+	const actor = normalizeActivityUser(getActivityActor(activity), activity.actorUserId);
+	const showActor = Boolean(activity.actorUserId && activity.actorUserId !== activity.userId);
 
 	return (
 		<div className='fixed inset-0 z-50 flex justify-end'>
@@ -150,7 +258,7 @@ export default function EventDetailsDrawer({ activity, onClose }) {
 						</div>
 					</section>
 
-					{/* User Information */}
+					{/* User Information — name + email only, never User ID */}
 					<section>
 						<div className='mb-4 flex items-center gap-2'>
 							<UserRound
@@ -164,35 +272,25 @@ export default function EventDetailsDrawer({ activity, onClose }) {
 
 						<div className='grid grid-cols-1 gap-5 rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:grid-cols-2'>
 							<DetailItem
-								label='User Name'
-								value={activity.user?.name}
+								label='Full Name'
+								value={customer.name || UNKNOWN_CUSTOMER_LABEL}
 							/>
 
 							<DetailItem
-								label='User Email'
-								value={activity.user?.email}
+								label='Email Address'
+								value={customer.email || NO_EMAIL_LABEL}
 							/>
 
-							<DetailItem
-								label='User ID'
-								value={activity.userId}
-							/>
-
-							<DetailItem
-								label='Actor User ID'
-								value={activity.actorUserId}
-							/>
-
-							{activity.actor && activity.actorUserId !== activity.userId && (
+							{showActor && (
 								<>
 									<DetailItem
-										label='Actor Name'
-										value={activity.actor?.name}
+										label='Performed By'
+										value={actor.name || 'Admin'}
 									/>
 
 									<DetailItem
-										label='Actor Email'
-										value={activity.actor?.email}
+										label='Performer Email'
+										value={actor.email || NO_EMAIL_LABEL}
 									/>
 								</>
 							)}
@@ -299,7 +397,7 @@ export default function EventDetailsDrawer({ activity, onClose }) {
 						</section>
 					)}
 
-					{/* Other Metadata */}
+					{/* Other Metadata (user identifiers redacted) */}
 					<section>
 						<div className='mb-4 flex items-center gap-2'>
 							<Database
@@ -311,7 +409,7 @@ export default function EventDetailsDrawer({ activity, onClose }) {
 							<h3 className='text-sm font-semibold text-stone-100'>Complete Metadata</h3>
 						</div>
 
-						<pre className='overflow-x-auto rounded-2xl border border-white/10 bg-black p-5 text-xs leading-6 text-emerald-300'>{JSON.stringify(metadata, null, 2)}</pre>
+						<pre className='overflow-x-auto rounded-2xl border border-white/10 bg-black p-5 text-xs leading-6 text-emerald-300'>{JSON.stringify(redactUserIds(metadata), null, 2)}</pre>
 					</section>
 				</div>
 

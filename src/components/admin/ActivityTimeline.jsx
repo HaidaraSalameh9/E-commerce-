@@ -1,10 +1,114 @@
-import { ShoppingBag, ShoppingCart, Trash2, Package, RefreshCw, Clock, User, Activity } from 'lucide-react';
+import { ShoppingBag, ShoppingCart, Trash2, Package, RefreshCw, Clock, User, Activity, SearchX } from 'lucide-react';
+
+/* ------------------------------------------------------------------
+ * User profile helpers (duplicated in the other Activity files —
+ * each file is self-contained, no shared helper module).
+ *
+ * The backend stores the customer snapshot on each activity under
+ * `customer` ({ name, email, imageUrl }); `user` is checked first in
+ * case a future response maps it. Placeholder values the backend
+ * writes when its Clerk lookup fails ("Unknown Customer",
+ * "Unnamed User", "No email") and any value that IS the user ID are
+ * treated as missing — User IDs are never displayed or searched.
+ * ------------------------------------------------------------------ */
+const UNKNOWN_CUSTOMER_LABEL = 'Unknown customer';
+const PLACEHOLDER_EMAILS = new Set(['no email', 'no-email', 'unknown', 'n/a', 'na', '—', '-']);
+const PLACEHOLDER_NAMES = new Set(['unknown customer', 'unnamed user', 'unknown user', 'customer', 'unknown', 'n/a', '—', '-']);
+
+function cleanProfileValue(value) {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
+function isIdLikeValue(value, userId) {
+	const v = cleanProfileValue(value);
+	if (!v) return true;
+	if (userId && v === userId) return true;
+	return /^user_[A-Za-z0-9]+$/.test(v);
+}
+
+function getDisplayName(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const joinedName = [cleanProfileValue(user.firstName), cleanProfileValue(user.lastName)].filter(Boolean).join(' ') || null;
+	for (const candidate of [user.name, user.fullName, joinedName, user.username]) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_NAMES.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayEmail(user, userId) {
+	if (!user || typeof user !== 'object') return null;
+	const candidates = [
+		user.email,
+		user.emailAddress,
+		user.primaryEmailAddress?.emailAddress,
+		user.primaryEmail?.emailAddress,
+		Array.isArray(user.emailAddresses) ? user.emailAddresses[0]?.emailAddress : null,
+	];
+	for (const candidate of candidates) {
+		const value = cleanProfileValue(candidate);
+		if (!value) continue;
+		if (PLACEHOLDER_EMAILS.has(value.toLowerCase())) continue;
+		if (isIdLikeValue(value, userId)) continue;
+		return value;
+	}
+	return null;
+}
+
+function getDisplayImage(user) {
+	if (!user || typeof user !== 'object') return null;
+	return cleanProfileValue(user.imageUrl) || cleanProfileValue(user.profileImageUrl) || cleanProfileValue(user.image) || cleanProfileValue(user.avatarUrl) || null;
+}
+
+function normalizeActivityUser(user, userId) {
+	return {
+		name: getDisplayName(user, userId),
+		email: getDisplayEmail(user, userId),
+		imageUrl: getDisplayImage(user),
+	};
+}
+
+function getActivityCustomer(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	return activity.user || activity.customer || null;
+}
+
+function getActivityActor(activity) {
+	if (!activity || typeof activity !== 'object') return null;
+	if (activity.actor) return activity.actor;
+	if (activity.actorUserId && activity.actorUserId === activity.userId) return getActivityCustomer(activity);
+	return null;
+}
+
+// Product titles across every metadata shape the backend writes:
+// cart events use metadata.productTitle, orders use
+// metadata.products[].title (metadata.title kept for safety).
+function getActivityProductTitles(activity) {
+	const metadata = activity?.metadata;
+	if (!metadata || typeof metadata !== 'object') return [];
+	const titles = [metadata.title, metadata.productTitle];
+	if (Array.isArray(metadata.products)) {
+		for (const product of metadata.products) titles.push(product?.title);
+	}
+	return [...new Set(titles.map(cleanProfileValue).filter(Boolean))];
+}
 
 /**
- * ActivityTimeline — same props as before ({ activities }), same
- * event config and metadata rendering. Only the skin changed: dark
- * card, warm-white type, gold accents, emerald / rose status tiles
- * kept but darkened so they read on charcoal.
+ * ActivityTimeline — same props as before ({ activities }), plus one
+ * optional prop:
+ *   search – the active user-search text. When provided and the list
+ *            is empty, the empty state explains that nothing matched
+ *            the search instead of claiming there is no activity.
+ *
+ * User display rules (helpers above):
+ *  - Shows the customer's real full name and personal email.
+ *  - NEVER shows a User ID. Missing profile data renders as
+ *    "Unknown customer" with no email, never as an ID.
  */
 const activityStyles = {
 	order_created: {
@@ -58,7 +162,9 @@ function formatActivityDate(date) {
 	}).format(parsedDate);
 }
 
-export default function ActivityTimeline({ activities = [] }) {
+export default function ActivityTimeline({ activities = [], search = '' }) {
+	const searchTerm = typeof search === 'string' ? search.trim() : '';
+
 	return (
 		<section className='rounded-card border border-white/10 bg-gradient-to-b from-[#1b1b17] to-[#161613] shadow-card'>
 			{/* Header */}
@@ -83,15 +189,28 @@ export default function ActivityTimeline({ activities = [] }) {
 				{activities.length === 0 ? (
 					<div className='flex flex-col items-center justify-center py-14 text-center'>
 						<div className='flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-stone-500'>
-							<Clock
-								size={26}
-								aria-hidden='true'
-							/>
+							{searchTerm ? (
+								<SearchX
+									size={26}
+									aria-hidden='true'
+								/>
+							) : (
+								<Clock
+									size={26}
+									aria-hidden='true'
+								/>
+							)}
 						</div>
 
-						<h3 className='mt-4 font-display font-semibold text-stone-100'>No activities yet</h3>
+						<h3 className='mt-4 font-display font-semibold text-stone-100'>
+							{searchTerm ? 'No results found' : 'No activities yet'}
+						</h3>
 
-						<p className='mt-2 max-w-xs text-sm text-stone-500'>New customer and order activities will appear here.</p>
+						<p className='mt-2 max-w-xs text-sm leading-relaxed text-stone-500'>
+							{searchTerm
+								? `Nothing matches “${searchTerm}”. Try a customer's full name or email, or clear the filters.`
+								: 'New customer and order activities will appear here.'}
+						</p>
 					</div>
 				) : (
 					<div className='relative'>
@@ -113,6 +232,13 @@ export default function ActivityTimeline({ activities = [] }) {
 								const Icon = config.icon;
 
 								const isAdminAction = activity.actorUserId && activity.actorUserId !== activity.userId;
+
+								// Resolve display-safe profile data. The backend stores
+								// the snapshot under `customer` (see helpers above).
+								// IDs are never used as a name/email fallback.
+								const customer = normalizeActivityUser(getActivityCustomer(activity), activity.userId);
+								const actor = normalizeActivityUser(getActivityActor(activity), activity.actorUserId);
+								const productTitles = getActivityProductTitles(activity);
 
 								return (
 									<div
@@ -151,7 +277,14 @@ export default function ActivityTimeline({ activities = [] }) {
 														</span>
 													)}
 
-													{activity.metadata.title && <span className='rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-stone-300'>{activity.metadata.title}</span>}
+													{productTitles.length > 0 && (
+														<span
+															className='rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-stone-300'
+															title={productTitles.join(', ')}>
+															{productTitles[0]}
+															{productTitles.length > 1 ? ` +${productTitles.length - 1} more` : ''}
+														</span>
+													)}
 
 													{activity.metadata.newStatus && (
 														<span className='rounded-lg border border-brass-400/30 bg-brass-400/10 px-3 py-1.5 text-xs font-medium text-brass-300'>
@@ -163,24 +296,23 @@ export default function ActivityTimeline({ activities = [] }) {
 												</div>
 											)}
 
-											{/* User information */}
+											{/* User information — full name + personal email only */}
 											<div className='mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500'>
-												<div className='flex items-center gap-1.5'>
+												<div className='flex min-w-0 flex-wrap items-center gap-1.5'>
 													<User
 														size={13}
-														className='text-stone-500'
+														className='shrink-0 text-stone-500'
 														aria-hidden='true'
 													/>
-													<span className='font-medium text-stone-300'>{activity.user?.name || 'Customer'}</span>
-													{activity.user?.email && activity.user.email !== 'No email' && <span className='text-stone-500'>({activity.user.email})</span>}
-													{!activity.user?.name && activity.userId && <span className='font-mono text-[11px] text-stone-500'>{activity.userId}</span>}
+													<span className='font-medium text-stone-300'>{customer.name || UNKNOWN_CUSTOMER_LABEL}</span>
+													{customer.email && <span className='break-all text-stone-500'>({customer.email})</span>}
 												</div>
 
 												{isAdminAction && (
-													<div className='flex items-center gap-1.5 rounded-md bg-brass-400/10 px-2 py-0.5 text-[11px] font-medium text-brass-300'>
+													<div className='flex flex-wrap items-center gap-1.5 rounded-md bg-brass-400/10 px-2 py-0.5 text-[11px] font-medium text-brass-300'>
 														<span>Action by:</span>
-														<span className='font-semibold'>{activity.actor?.name || 'Admin'}</span>
-														{activity.actor?.email && activity.actor.email !== 'No email' && <span className='text-brass-400'>({activity.actor.email})</span>}
+														<span className='font-semibold'>{actor.name || 'Admin'}</span>
+														{actor.email && <span className='break-all text-brass-400'>({actor.email})</span>}
 													</div>
 												)}
 											</div>
